@@ -53,7 +53,7 @@ pub trait UserInterface {
 // accomodate those types of server that may not be able to be satisfied with a traditional
 // host/port pair.
 pub trait ConnectionInterface {
-    fn start_connection(&mut self, address: String) -> ConnectionID;
+    fn start_connection(&mut self, address: String) -> Result<ConnectionID, String>;
     fn stop_connection(&mut self, which: ConnectionID) -> Result<(), ()>;
 
     fn listener(&mut self) -> Box<EventSource + Send>;
