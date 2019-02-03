@@ -28,8 +28,8 @@ pub trait EventSource {
 
 // This object, as noted above, deals with managing sources of Events.
 pub trait EventManager {
-    fn add(&mut self, src: EventSource);
-    fn next_event(&mut self) -> Event;
+    fn start_source(&mut self, src: Box<EventSource + Send>);
+    fn next_event(&mut self) -> Result<Event, String>;
 }
 
 // This object knows about the logistical details of handling UI, like drawing to the screens.
