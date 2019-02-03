@@ -42,6 +42,8 @@ pub trait UserInterface {
     // is surface to the user, is the UI code's business.
     fn push_to_window(&mut self, window: String, line: String) -> Result<(), ()>;
     fn register_command(&mut self, c: Command);
+
+    fn listener(&mut self) -> Box<EventSource + Send>;
 }
 
 // This type of object knows about servers and contains the low-level logic for connecting and
@@ -53,5 +55,7 @@ pub trait UserInterface {
 pub trait ConnectionInterface {
     fn start_connection(&mut self, address: String) -> ConnectionID;
     fn stop_connection(&mut self, which: ConnectionID) -> Result<(), ()>;
+
+    fn listener(&mut self) -> Box<EventSource + Send>;
 }
 

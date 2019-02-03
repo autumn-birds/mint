@@ -12,7 +12,7 @@ pub struct ThreadedManager {
 }
 
 impl ThreadedManager {
-    fn new() -> ThreadedManager {
+    pub fn new() -> ThreadedManager {
         let (tx, rx) = mpsc::channel::<Event>();
         ThreadedManager {
             channel_rx: rx,
@@ -35,6 +35,9 @@ impl EventManager for ThreadedManager {
         // TODO: In the future it would be good to have some kind of check on whether the threads
         // in question are still running.  Unfortunately I'm...not really clear on how I'd do that
         // right now.
+        //
+        // (Probably requires a second thread started to block on join()ing the first thread and
+        // then send a special Event type back to indicate that the first thread died.)
         if self.threads.len() < 1 {
             Err("No threads are running; would block forever".to_string())
         } else {
