@@ -145,13 +145,6 @@ impl EventSource for TcpListener {
                     loop {
                         // TODO: Again, error handling?
                         match links.get_mut(&cid).unwrap().read(&mut buffer) {
-                            Ok(num_bytes) => {
-                                // TODO: Actual handling of, like, lines (e.g. buffer until \n)
-                                channel.send(Event::ServerText {
-                                    which: cid,
-                                    line: String::from_utf8_lossy(&buffer[..num_bytes]).to_string(),
-                                }).expect("Couldn't send ServerText");
-                            },
                             Ok(0) => {
                                 // End of the link.  Drop it on this end.  TODO: The
                                 // TcpConnectionManager instance in the main thread will probably
@@ -160,11 +153,19 @@ impl EventSource for TcpListener {
                                 // ideal, because it means we have a non-obvious API that the
                                 // outside world needs to honor.  Ideally we'd be able to tend all
                                 // of our own internal state here.)
+                                poll.deregister(links.get(&cid).unwrap());
                                 links.remove(&cid);
                                 channel.send(Event::ConnectionEnd {
                                     which: cid,
                                     reason: "Socket closed.".to_string(),
                                 }).expect("Couldn't send ConnectionEnd");
+                            },
+                            Ok(num_bytes) => {
+                                // TODO: Actual handling of, like, lines (e.g. buffer until \n)
+                                channel.send(Event::ServerText {
+                                    which: cid,
+                                    line: String::from_utf8_lossy(&buffer[..num_bytes]).to_string(),
+                                }).expect("Couldn't send ServerText");
                             },
                             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                                 // The socket is not ready anymore, stop reading
