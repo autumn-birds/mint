@@ -101,6 +101,10 @@ impl ConnectionInterface for TcpConnectionManager {
         Ok(())
     }
 
+    fn write_to_connection(&mut self, which: ConnectionID, what: String) -> Result<(), ()> {
+        Ok(())
+    }
+
     fn listener(&mut self) -> Box<EventSource + Send> {
         match (self.socketreg_rx.take(), self.socketreg_alert.take()) {
             (Some(rx), Some(alert)) => Box::new(TcpListener {
@@ -143,7 +147,9 @@ impl EventSource for TcpListener {
                     // produce a complete line.  For now (for testing) this will do.
                     let mut buffer = [0u8; BUFFER_SIZE];
                     loop {
-                        // TODO: Again, error handling?
+                        // TODO: IMPORTANT -- Don't panic if it doesn't exist in the links.  Do
+                        // something else, like sending an internal error and closing/deregistering
+                        // or whatever seems most appropriate.
                         match links.get_mut(&cid).expect("links.get_mut").read(&mut buffer) {
                             Ok(0) => {
                                 // End of the link.  Drop it on this end.  TODO: The
@@ -173,10 +179,9 @@ impl EventSource for TcpListener {
                                 break;
                             },
                             Err(e) => {
-                                // TODO: It's probably better to just act like the link ended??  Or
-                                // at least assume the worst, *try to* clean up the link by closing
-                                // the socket, and then send our disconnection events and drop it
-                                // like we normally would...
+                                // We assume the link wrapped up here--that an error means we
+                                // probably can't keep using it.  TODO: Do we need to (or should
+                                // we) do anything to make sure e.g. close()ing?
                                 poll.deregister(links.get(&cid).expect("links.get"));
                                 links.remove(&cid);
                                 channel.send(Event::ConnectionEnd {
