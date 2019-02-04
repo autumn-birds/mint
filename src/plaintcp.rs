@@ -144,7 +144,7 @@ impl EventSource for TcpListener {
                     let mut buffer = [0u8; BUFFER_SIZE];
                     loop {
                         // TODO: Again, error handling?
-                        match links.get_mut(&cid).unwrap().read(&mut buffer) {
+                        match links.get_mut(&cid).expect("links.get_mut").read(&mut buffer) {
                             Ok(0) => {
                                 // End of the link.  Drop it on this end.  TODO: The
                                 // TcpConnectionManager instance in the main thread will probably
@@ -153,12 +153,13 @@ impl EventSource for TcpListener {
                                 // ideal, because it means we have a non-obvious API that the
                                 // outside world needs to honor.  Ideally we'd be able to tend all
                                 // of our own internal state here.)
-                                poll.deregister(links.get(&cid).unwrap());
+                                poll.deregister(links.get(&cid).expect("links.get"));
                                 links.remove(&cid);
                                 channel.send(Event::ConnectionEnd {
                                     which: cid,
                                     reason: "Socket closed.".to_string(),
                                 }).expect("Couldn't send ConnectionEnd");
+                                break;
                             },
                             Ok(num_bytes) => {
                                 // TODO: Actual handling of, like, lines (e.g. buffer until \n)
@@ -176,11 +177,13 @@ impl EventSource for TcpListener {
                                 // at least assume the worst, *try to* clean up the link by closing
                                 // the socket, and then send our disconnection events and drop it
                                 // like we normally would...
+                                poll.deregister(links.get(&cid).expect("links.get"));
                                 links.remove(&cid);
                                 channel.send(Event::ConnectionEnd {
                                     which: cid,
                                     reason: format!("Unexpected read error: {:?}", e),
                                 }).expect("Couldn't send ConnectionEnd on unexpected read error");
+                                break;
                             },
                         }
                     }

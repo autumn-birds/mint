@@ -24,7 +24,7 @@ fn main() {
     loop {
         match event.expect("Error in next_event()") {
             Event::ServerText { line: l, which: c } => { println!("## {} ==> {}", c, l); },
-            _ => { println!("Other random event"); },
+            ref event => { println!("Unhandled event: {:?}", event); },
         }
         event = manager.next_event();
     }
