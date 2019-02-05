@@ -9,7 +9,6 @@ use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::sync::mpsc;
 
-use std::os::unix::io::{RawFd, AsRawFd, FromRawFd};
 use std::io::Read;
 
 const BUFFER_SIZE: usize = 4096;
@@ -121,7 +120,7 @@ impl EventSource for TcpListener {
         // TODO: See the comment in ThreadedManager (events.rs).  Make this thread return an
         // appropriate Result type to where we can use `?` unstead of unwrap(), and watch for that
         // as noted there.
-        let mut poll = Poll::new().unwrap();
+        let poll = Poll::new().unwrap();
         let mut events = Events::with_capacity(128);
         let mut links = HashMap::new();
 
