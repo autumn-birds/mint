@@ -1,3 +1,7 @@
+extern crate termion;
+
+use std::collections::BTreeSet;
+
 
 #[derive(Copy, Clone)]
 struct FmtOpts {
@@ -140,5 +144,148 @@ fn format(text: String, logical_idx: usize, opts: FmtOpts) -> Vec<ScreenLine> {
     }
 
     result
+}
+
+
+// Note: Rust docs say std::cmp::PartialOrd is derivable and will produce a lexicographic ordering
+// based on the top-to-bottom declaration order of the Struct's members.  WARNING!  DO NOT CHANGE
+// ORDER OF DECLARATION OF Y AND X!
+//
+// (TODO: Actually impl the Ord functions so this is not an 'invisible' requirement?)
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct Point {
+    y: usize,
+    x: usize,
+}
+
+#[test]
+fn point_order() {
+    let mut points: BTreeSet<Point> = BTreeSet::new();
+    points.insert(Point { x: 3, y: 5 });
+    points.insert(Point { x: 4, y: 5 });
+    points.insert(Point { x: 5, y: 5 });
+    points.insert(Point { x: 7, y: 5 });
+    points.insert(Point { x: 2, y: 5 });
+    points.insert(Point { x: 1, y: 6 });
+
+    let points_ord: Vec<Point> = points.into_iter().collect();
+    assert_eq!(points_ord[0], Point {x:2,y:5});
+    assert_eq!(points_ord[1], Point {x:3,y:5});
+    assert_eq!(points_ord[2], Point {x:4,y:5});
+    assert_eq!(points_ord[3], Point {x:5,y:5});
+    assert_eq!(points_ord[4], Point {x:7,y:5});
+    assert_eq!(points_ord[5], Point {x:1,y:6});
+}
+
+
+/// Very work-in-progress 'damage buffer' type of display.
+struct DamageBuffer {
+    points_to_draw: BTreeSet<Point>,
+    redraw_all: bool,
+    clear_all: bool,
+
+    w: usize,
+    h: usize,
+    // This was chosen to be String not Char because some Unicode characters can take up multiple
+    // chars and so why not
+    buffer: Vec<String>,
+}
+
+impl DamageBuffer {
+    fn new(w: usize, h: usize) -> DamageBuffer {
+        let buffer = DamageBuffer {
+            w, h,
+            buffer: std::iter::repeat(" ".to_string()).take(w*h).collect(),
+            points_to_draw: BTreeSet::new(),
+            redraw_all: false,
+            clear_all: false,
+        };
+
+        buffer
+    }
+
+    fn clear(&mut self) {
+        self.buffer = std::iter::repeat(" ".to_string())
+            .take(self.w * self.h)
+            .collect();
+        self.points_to_draw.clear();
+        self.redraw_all = false;
+        self.clear_all = true;
+    }
+
+    fn resize(&mut self, new_w: usize, new_h: usize) {
+        self.w = new_w;
+        self.h = new_h;
+        self.buffer.resize(self.w * self.h, " ".to_string());
+        self.redraw_all = true;
+    }
+
+    fn write_string(&mut self, loc: Point, what: String) {
+        let mut x: usize = loc.x;
+        for c in what.chars() {
+            if x < self.w && loc.y < self.h {
+                let c = c.to_string();
+                // We're indexing into a 2D grid laid out row by row in a 1D memory buffer.  So we
+                // compute the 1D index by multiplying y by the row length, then adding x (the
+                // offset inside that row.)
+                let i = loc.y * self.w + x;
+
+                if c != self.buffer[i] {
+                    self.buffer[i] = c;
+                    self.points_to_draw.insert(Point { x, y: loc.y });
+                }
+            }
+            x += 1;
+        }
+    }
+
+    fn redraw(&mut self) {
+        // TODO: take something that can be write!() to
+        let mut last_point = Point { x:0, y:0 };
+        print!("{}", termion::cursor::Goto(1,1));
+
+        // TODO: Think about ways to refactor this, since we're doing the same thing in two places.
+        // You can get an Iterator over all Points with the following:
+        //
+        // (0..h).map(|x| std::iter::repeat(x).zip(0..w)).flatten().map(|(x,y)| Point { x,y })
+        //
+        // Unfortunately, I couldn't just switch which Iterator I was using because the types
+        // were incompatible.  I'd probably have to call collect() on both or something, and
+        // that sounds expensive.
+        //
+        // I could probably make a closure then call for_each() in two places depending on the
+        // branch, but that seems like it'd be slower.  I should probably try doing it anyway.
+
+        if self.clear_all {
+            print!("{}", termion::clear::All);
+        }
+
+        if self.redraw_all {
+            for y in 0..self.h {
+                for x in 0..self.w {
+                    if y != last_point.y || x as isize - last_point.x as isize != 1 {
+                        print!("{}", termion::cursor::Goto((x+1) as u16, (y+1) as u16));
+                    }
+
+                    print!("{}", self.buffer[y * self.w + x]);
+                    last_point.x = x; last_point.y = y;
+                }
+            }
+        } else {
+            // See, we do the exact same thing here, just with a different source of x/y coordinates.
+            for Point { x, y } in &self.points_to_draw {
+                if *y != last_point.y || *x as isize - last_point.x as isize != 1 {
+                    print!("{}", termion::cursor::Goto((x+1) as u16, (y+1) as u16));
+                }
+
+                print!("{}", self.buffer[y * self.w + x]);
+                last_point.x = *x; last_point.y = *y;
+            }
+        }
+
+        self.points_to_draw.clear();
+        self.redraw_all = false;
+        self.clear_all = false;
+    }
 }
 
