@@ -97,10 +97,12 @@ impl ConnectionInterface for TcpConnectionManager {
     }
 
     fn stop_connection(&mut self, which: ConnectionID) -> Result<(), ()> {
+        // TODO: Implement this
         Ok(())
     }
 
     fn write_to_connection(&mut self, which: ConnectionID, what: String) -> Result<(), ()> {
+        // TODO: Implement this
         Ok(())
     }
 
