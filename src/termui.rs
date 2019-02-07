@@ -2,8 +2,11 @@ extern crate termion;
 
 use std::collections::BTreeSet;
 
+extern crate fnv;
+use fnv::FnvHashMap;
 
-#[derive(Copy, Clone)]
+
+#[derive(Copy, Clone, PartialEq, Eq)]
 struct FmtOpts {
     w: usize,
     // `i`: The indent value.  Positive values give a hanging indent like tinyfugue, while negative
@@ -11,17 +14,13 @@ struct FmtOpts {
     i: isize,
 }
 
+#[derive(Clone)]
 struct ScreenLine {
     text: String,
     for_opts: FmtOpts,
-
-    // We need to keep an index around so we never forget where we are when e.g. resizing the
-    // window: this points back to the original or 'logical' line we're creating a word-wrapped
-    // view onto.
-    from_logical: usize,
 }
 
-fn format(text: String, logical_idx: usize, opts: FmtOpts) -> Vec<ScreenLine> {
+fn format(text: String, opts: FmtOpts) -> Vec<ScreenLine> {
     let mut result = vec![];
 
     // We want to walk through the string and, so long as the amount of space it takes up so
@@ -118,7 +117,6 @@ fn format(text: String, logical_idx: usize, opts: FmtOpts) -> Vec<ScreenLine> {
 
             result.push(ScreenLine {
                 text: line,
-                from_logical: logical_idx,
                 for_opts: opts,
             });
         }
@@ -138,7 +136,6 @@ fn format(text: String, logical_idx: usize, opts: FmtOpts) -> Vec<ScreenLine> {
         last_line.push_str(last_chunk);
         result.push(ScreenLine {
             text: last_line,
-            from_logical: logical_idx,
             for_opts: opts,
         });
     }
@@ -289,3 +286,96 @@ impl DamageBuffer {
     }
 }
 
+
+/// A view onto some word-wrapped lines.
+struct WrappedView {
+    h: usize,
+    fmt: FmtOpts,
+
+    // This is our 'history buffer', in ascending order -- that is, the most recent line always has
+    // the highest index.  We're usually going to be going in reverse chronological order because
+    // we draw up from the bottom of the view and new lines appear on the bottom of the view; it's
+    // a chat program, after all.
+    history: Vec<String>,
+
+    // We store a _cache_ of the results of word-wrapping each of the history lines to our view
+    // settings (stored in self.fmt) so that we're not calling the relatively expensive
+    // word-wrapping function on a relatively large input every single time a new line arrives and
+    // we want to redraw. This is a cache and not, directly, a view buffer, because the mapping
+    // from word-wrapped lines onto 'logical' history lines changes every time the view is resized.
+    //
+    // We use the FnvHashMap from crates.io here because it is API compatible with the regular
+    // HashMap and is said to be faster for small inputs "like integers."  (Our indexes are
+    // basically the same thing as array indexes.)  We're using a hashmap in the first place
+    // because a Vec<> would force us to recompute every single line every time the view was
+    // resized, which would gobble up a lot of CPU time with big histories.  I'm hoping the hash
+    // map cache is still better than recomputing a small subset of lines every time the view is
+    // rendered in that case, but I could be wrong -- I might be prematurely optimizing here.
+    cache: FnvHashMap<usize, Vec<ScreenLine>>,
+
+    // The scroll position is stored in terms of two numbers, an index onto the history line at the
+    // bottom of the view (i.e., the first one we draw before working upwards to the next and the
+    // next, etc.; the most recent one visible) and a measure of how many view lines within it we
+    // throw away before starting to draw.  Think of the second number as a negative index.
+    position: (usize, usize),
+}
+
+impl WrappedView {
+    fn new(w: usize, h: usize) -> WrappedView {
+        WrappedView {
+            h,
+            fmt: FmtOpts {
+                i: 4, w
+            },
+            history: vec![],
+            cache: FnvHashMap::default(),
+            position: (0,0),
+        }
+    }
+
+    /// Add a line to the View.
+    fn push(&mut self, line: String) {
+        self.history.push(line);
+
+        // Check if we were previously at the end of the history and if so, make sure we stay at
+        // the end of the history.
+        if self.position.0 == self.history.len() - 2 {
+            self.position.0 = self.history.len() - 1;
+            self.position.1 = 0;
+        }
+    }
+
+    /// Internal function: Fetch the list of word-wrapped lines representing a single logical line,
+    /// recomputing only if necessary.  Called on a history index and not a String.
+    fn wrap(&mut self, line: usize) -> Vec<ScreenLine> {
+        if line >= self.history.len() {
+            panic!("WrappedView::wrap(): index out of bounds");
+        }
+
+        if let Some(lines) = self.cache.get(&line) {
+            if lines[0].for_opts == self.fmt {
+                return lines.clone();
+            }
+        }
+
+        // If we got here, either it hasn't been calculated yet or we changed the format options,
+        // which means we'd better recompute.
+        let new_lines = format(self.history[line].clone(), self.fmt);
+        self.cache.insert(line, new_lines.clone());
+        new_lines
+    }
+
+    /// Return a Vec of Strings representing what should currently be drawn on screen for
+    /// this view.  The Vec is guaranteed to be self.h items long (index 0 = top of view) and each
+    /// String attempts to be self.fmt.w `char`s wide.
+    fn render(&mut self) -> Vec<String> {
+        // TODO use iterators??
+        //
+        // (self.position.0..0).map(|i| {
+        //     self.wrap(i).iter()
+        // }).flatten().drop(self.position.1).take_up_to(self.h)
+        //
+        // seems to me we could do some clever stuff with iterators, yeah.
+        vec![]
+    }
+}
