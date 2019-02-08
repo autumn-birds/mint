@@ -288,7 +288,7 @@ impl DamageBuffer {
 
 
 /// A view onto some word-wrapped lines.
-struct WrappedView {
+pub struct WrappedView {
     h: usize,
     fmt: FmtOpts,
 
@@ -321,7 +321,7 @@ struct WrappedView {
 }
 
 impl WrappedView {
-    fn new(w: usize, h: usize) -> WrappedView {
+    pub fn new(w: usize, h: usize) -> WrappedView {
         WrappedView {
             h,
             fmt: FmtOpts {
@@ -334,12 +334,14 @@ impl WrappedView {
     }
 
     /// Add a line to the View.
-    fn push(&mut self, line: String) {
+    pub fn push(&mut self, line: String) {
+        let current_histlen = self.history.len();
         self.history.push(line);
 
         // Check if we were previously at the end of the history and if so, make sure we stay at
-        // the end of the history.
-        if self.position.0 == self.history.len() - 2 {
+        // the end of the history.  Special case for when the history is empty, as there's not yet
+        // anything to not be at the end of.
+        if current_histlen == 0 || self.position.0 == current_histlen - 1 {
             self.position.0 = self.history.len() - 1;
             self.position.1 = 0;
         }
@@ -347,14 +349,14 @@ impl WrappedView {
 
     /// Internal function: Fetch the list of word-wrapped lines representing a single logical line,
     /// recomputing only if necessary.  Called on a history index and not a String.
-    fn wrap(&mut self, line: usize) -> Vec<ScreenLine> {
+    fn wrap(&mut self, line: usize) -> Option<Vec<ScreenLine>> {
         if line >= self.history.len() {
-            panic!("WrappedView::wrap(): index out of bounds");
+            return None;
         }
 
         if let Some(lines) = self.cache.get(&line) {
             if lines[0].for_opts == self.fmt {
-                return lines.clone();
+                return Some(lines.clone());
             }
         }
 
@@ -362,13 +364,13 @@ impl WrappedView {
         // which means we'd better recompute.
         let new_lines = format(self.history[line].clone(), self.fmt);
         self.cache.insert(line, new_lines.clone());
-        new_lines
+        Some(new_lines)
     }
 
     /// Return a Vec of Strings representing what should currently be drawn on screen for
     /// this view.  The Vec is guaranteed to be self.h items long (index 0 = top of view) and each
     /// String attempts to be self.fmt.w `char`s wide.
-    fn render(&mut self) -> Vec<String> {
+    pub fn render(&mut self) -> Vec<String> {
         // TODO use iterators??
         //
         // (self.position.0..0).map(|i| {
@@ -376,6 +378,28 @@ impl WrappedView {
         // }).flatten().drop(self.position.1).take_up_to(self.h)
         //
         // seems to me we could do some clever stuff with iterators, yeah.
-        vec![]
+
+        let lines_wanted = self.h;
+        let fmt = self.fmt;
+
+        if self.history.len() > 0 {
+            // Here we have a CONFUSING TANGLE OF ITERATORS.
+            //
+            // This does exactly what I want, but it's probably kind of hard to read.  In fact,
+            // I've even kind of confused myself.  Sorry?
+
+            let v: Vec<String> = (0..self.position.0+1).rev().map(|i| {
+                // For every line in history, going backwards from the most recent...
+                self.wrap(i).expect("wrap(i) in render()").into_iter().rev()
+            }).flatten().map(|l| l.text).chain(std::iter::repeat(" ".repeat(fmt.w)))
+              .take(lines_wanted).collect();
+
+            // We needed to reverse the final iterator but take() isn't a DoubleEndedIterator.  So I
+            // have to consume the Vec, reverse that iterator and collect it again.  Hopefully this
+            // doesn't hurt performance too much.
+            v.into_iter().rev().collect()
+        } else {
+            std::iter::repeat(" ".repeat(fmt.w)).take(self.h).collect()
+        }
     }
 }
