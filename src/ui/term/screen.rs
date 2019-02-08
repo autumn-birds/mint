@@ -298,7 +298,7 @@ fn point_order() {
 
 
 /// Very work-in-progress 'damage buffer' type of display.
-struct DamageBuffer {
+pub struct DamageBuffer {
     points_to_draw: BTreeSet<Point>,
     redraw_all: bool,
     clear_all: bool,
@@ -311,7 +311,7 @@ struct DamageBuffer {
 }
 
 impl DamageBuffer {
-    fn new(w: usize, h: usize) -> DamageBuffer {
+    pub fn new(w: usize, h: usize) -> DamageBuffer {
         let buffer = DamageBuffer {
             w, h,
             buffer: std::iter::repeat(" ".to_string()).take(w*h).collect(),
@@ -323,7 +323,7 @@ impl DamageBuffer {
         buffer
     }
 
-    fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.buffer = std::iter::repeat(" ".to_string())
             .take(self.w * self.h)
             .collect();
@@ -332,33 +332,34 @@ impl DamageBuffer {
         self.clear_all = true;
     }
 
-    fn resize(&mut self, new_w: usize, new_h: usize) {
+    pub fn resize(&mut self, new_w: usize, new_h: usize) {
         self.w = new_w;
         self.h = new_h;
         self.buffer.resize(self.w * self.h, " ".to_string());
         self.redraw_all = true;
     }
 
-    fn write_string(&mut self, loc: Point, what: String) {
-        let mut x: usize = loc.x;
+    pub fn write_string(&mut self, x: usize, y: usize, what: String) {
+        let mut x = x;
+
         for c in what.chars() {
-            if x < self.w && loc.y < self.h {
+            if x < self.w && y < self.h {
                 let c = c.to_string();
                 // We're indexing into a 2D grid laid out row by row in a 1D memory buffer.  So we
                 // compute the 1D index by multiplying y by the row length, then adding x (the
                 // offset inside that row.)
-                let i = loc.y * self.w + x;
+                let i = y * self.w + x;
 
                 if c != self.buffer[i] {
                     self.buffer[i] = c;
-                    self.points_to_draw.insert(Point { x, y: loc.y });
+                    self.points_to_draw.insert(Point { x, y });
                 }
             }
             x += 1;
         }
     }
 
-    fn redraw(&mut self) {
+    pub fn redraw(&mut self) {
         // TODO: take something that can be write!() to
         let mut last_point = Point { x:0, y:0 };
         print!("{}", termion::cursor::Goto(1,1));
