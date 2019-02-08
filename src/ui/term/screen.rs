@@ -1,10 +1,8 @@
-extern crate termion;
-
+extern crate termion; 
 use std::collections::BTreeSet;
 
 extern crate fnv;
 use fnv::FnvHashMap;
-
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 struct FmtOpts {
@@ -144,11 +142,135 @@ fn format(text: String, opts: FmtOpts) -> Vec<ScreenLine> {
 }
 
 
+/// A view onto some word-wrapped lines.
+pub struct WrappedView {
+    h: usize,
+    fmt: FmtOpts,
+
+    // This is our 'history buffer', in ascending order -- that is, the most recent line always has
+    // the highest index.  We're usually going to be going in reverse chronological order because
+    // we draw up from the bottom of the view and new lines appear on the bottom of the view; it's
+    // a chat program, after all.
+    history: Vec<String>,
+
+    // We store a _cache_ of the results of word-wrapping each of the history lines to our view
+    // settings (stored in self.fmt) so that we're not calling the relatively expensive
+    // word-wrapping function on a relatively large input every single time a new line arrives and
+    // we want to redraw. This is a cache and not, directly, a view buffer, because the mapping
+    // from word-wrapped lines onto 'logical' history lines changes every time the view is resized.
+    //
+    // We use the FnvHashMap from crates.io here because it is API compatible with the regular
+    // HashMap and is said to be faster for small inputs "like integers."  (Our indexes are
+    // basically the same thing as array indexes.)  We're using a hashmap in the first place
+    // because a Vec<> would force us to recompute every single line every time the view was
+    // resized, which would gobble up a lot of CPU time with big histories.  I'm hoping the hash
+    // map cache is still better than recomputing a small subset of lines every time the view is
+    // rendered in that case, but I could be wrong -- I might be prematurely optimizing here.
+    cache: FnvHashMap<usize, Vec<ScreenLine>>,
+
+    // The scroll position is stored in terms of two numbers, an index onto the history line at the
+    // bottom of the view (i.e., the first one we draw before working upwards to the next and the
+    // next, etc.; the most recent one visible) and a measure of how many view lines within it we
+    // throw away before starting to draw.  Think of the second number as a negative index.
+    position: (usize, usize),
+}
+
+impl WrappedView {
+    pub fn new(w: usize, h: usize) -> WrappedView {
+        WrappedView {
+            h,
+            fmt: FmtOpts {
+                i: 4, w
+            },
+            history: vec![],
+            cache: FnvHashMap::default(),
+            position: (0,0),
+        }
+    }
+
+    /// Add a line to the View.
+    pub fn push(&mut self, line: String) {
+        let current_histlen = self.history.len();
+        self.history.push(line);
+
+        // Check if we were previously at the end of the history and if so, make sure we stay at
+        // the end of the history.  Special case for when the history is empty, as there's not yet
+        // anything to not be at the end of.
+        if current_histlen == 0 || self.position.0 == current_histlen - 1 {
+            self.position.0 = self.history.len() - 1;
+            self.position.1 = 0;
+        }
+    }
+
+    /// Internal function: Fetch the list of word-wrapped lines representing a single logical line,
+    /// recomputing only if necessary.  Called on a history index and not a String.
+    fn wrap(&mut self, line: usize) -> Option<Vec<ScreenLine>> {
+        if line >= self.history.len() {
+            return None;
+        }
+
+        if let Some(lines) = self.cache.get(&line) {
+            if lines[0].for_opts == self.fmt {
+                return Some(lines.clone());
+            }
+        }
+
+        // If we got here, either it hasn't been calculated yet or we changed the format options,
+        // which means we'd better recompute.
+        let new_lines = format(self.history[line].clone(), self.fmt);
+        self.cache.insert(line, new_lines.clone());
+        Some(new_lines)
+    }
+
+    /// Return a Vec of Strings representing what should currently be drawn on screen for
+    /// this view.  The Vec is guaranteed to be self.h items long (index 0 = top of view) and each
+    /// String attempts to be self.fmt.w `char`s wide.
+    pub fn render(&mut self) -> Vec<String> {
+        // TODO use iterators??
+        //
+        // (self.position.0..0).map(|i| {
+        //     self.wrap(i).iter()
+        // }).flatten().drop(self.position.1).take_up_to(self.h)
+        //
+        // seems to me we could do some clever stuff with iterators, yeah.
+
+        let lines_wanted = self.h;
+        let fmt = self.fmt;
+
+        if self.history.len() > 0 {
+            // Here we have a CONFUSING TANGLE OF ITERATORS.
+            //
+            // This does exactly what I want, but it's probably kind of hard to read.  In fact,
+            // I've even kind of confused myself.  Sorry?
+
+            let v: Vec<String> = (0..self.position.0+1).rev().map(|i| {
+                // For every line in history, going backwards from the most recent...
+                self.wrap(i).expect("wrap(i) in render()").into_iter().rev()
+            }).flatten().map(|l| l.text).chain(std::iter::repeat(" ".repeat(fmt.w)))
+              .take(lines_wanted).collect();
+
+            // We needed to reverse the final iterator but take() isn't a DoubleEndedIterator.  So I
+            // have to consume the Vec, reverse that iterator and collect it again.  Hopefully this
+            // doesn't hurt performance too much.
+            v.into_iter().rev().collect()
+        } else {
+            std::iter::repeat(" ".repeat(fmt.w)).take(self.h).collect()
+        }
+    }
+}
+
+
+
 // Note: Rust docs say std::cmp::PartialOrd is derivable and will produce a lexicographic ordering
 // based on the top-to-bottom declaration order of the Struct's members.  WARNING!  DO NOT CHANGE
 // ORDER OF DECLARATION OF Y AND X!
 //
 // (TODO: Actually impl the Ord functions so this is not an 'invisible' requirement?)
+
+/// Some point in a 2D grid with origin at 0,0.  Ord/PartialOrd are implemented such that a list of
+/// these points, when sorted, will be ordered by y-value and then by x-value, such that any runs
+/// of points along a single row of the grid (e.g., with the x-value increasing and y remaining
+/// constant) will occur together and in order.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct Point {
     y: usize,
@@ -271,6 +393,9 @@ impl DamageBuffer {
         } else {
             // See, we do the exact same thing here, just with a different source of x/y coordinates.
             for Point { x, y } in &self.points_to_draw {
+                // If we have a sequence of points to write each of which is exactly one cell to
+                // the right of the previous one, we can just write them out without jumping.  If
+                // we *aren't* exactly one cell to the right of whatever we drew last, we jump.
                 if *y != last_point.y || *x as isize - last_point.x as isize != 1 {
                     print!("{}", termion::cursor::Goto((x+1) as u16, (y+1) as u16));
                 }
@@ -287,119 +412,3 @@ impl DamageBuffer {
 }
 
 
-/// A view onto some word-wrapped lines.
-pub struct WrappedView {
-    h: usize,
-    fmt: FmtOpts,
-
-    // This is our 'history buffer', in ascending order -- that is, the most recent line always has
-    // the highest index.  We're usually going to be going in reverse chronological order because
-    // we draw up from the bottom of the view and new lines appear on the bottom of the view; it's
-    // a chat program, after all.
-    history: Vec<String>,
-
-    // We store a _cache_ of the results of word-wrapping each of the history lines to our view
-    // settings (stored in self.fmt) so that we're not calling the relatively expensive
-    // word-wrapping function on a relatively large input every single time a new line arrives and
-    // we want to redraw. This is a cache and not, directly, a view buffer, because the mapping
-    // from word-wrapped lines onto 'logical' history lines changes every time the view is resized.
-    //
-    // We use the FnvHashMap from crates.io here because it is API compatible with the regular
-    // HashMap and is said to be faster for small inputs "like integers."  (Our indexes are
-    // basically the same thing as array indexes.)  We're using a hashmap in the first place
-    // because a Vec<> would force us to recompute every single line every time the view was
-    // resized, which would gobble up a lot of CPU time with big histories.  I'm hoping the hash
-    // map cache is still better than recomputing a small subset of lines every time the view is
-    // rendered in that case, but I could be wrong -- I might be prematurely optimizing here.
-    cache: FnvHashMap<usize, Vec<ScreenLine>>,
-
-    // The scroll position is stored in terms of two numbers, an index onto the history line at the
-    // bottom of the view (i.e., the first one we draw before working upwards to the next and the
-    // next, etc.; the most recent one visible) and a measure of how many view lines within it we
-    // throw away before starting to draw.  Think of the second number as a negative index.
-    position: (usize, usize),
-}
-
-impl WrappedView {
-    pub fn new(w: usize, h: usize) -> WrappedView {
-        WrappedView {
-            h,
-            fmt: FmtOpts {
-                i: 4, w
-            },
-            history: vec![],
-            cache: FnvHashMap::default(),
-            position: (0,0),
-        }
-    }
-
-    /// Add a line to the View.
-    pub fn push(&mut self, line: String) {
-        let current_histlen = self.history.len();
-        self.history.push(line);
-
-        // Check if we were previously at the end of the history and if so, make sure we stay at
-        // the end of the history.  Special case for when the history is empty, as there's not yet
-        // anything to not be at the end of.
-        if current_histlen == 0 || self.position.0 == current_histlen - 1 {
-            self.position.0 = self.history.len() - 1;
-            self.position.1 = 0;
-        }
-    }
-
-    /// Internal function: Fetch the list of word-wrapped lines representing a single logical line,
-    /// recomputing only if necessary.  Called on a history index and not a String.
-    fn wrap(&mut self, line: usize) -> Option<Vec<ScreenLine>> {
-        if line >= self.history.len() {
-            return None;
-        }
-
-        if let Some(lines) = self.cache.get(&line) {
-            if lines[0].for_opts == self.fmt {
-                return Some(lines.clone());
-            }
-        }
-
-        // If we got here, either it hasn't been calculated yet or we changed the format options,
-        // which means we'd better recompute.
-        let new_lines = format(self.history[line].clone(), self.fmt);
-        self.cache.insert(line, new_lines.clone());
-        Some(new_lines)
-    }
-
-    /// Return a Vec of Strings representing what should currently be drawn on screen for
-    /// this view.  The Vec is guaranteed to be self.h items long (index 0 = top of view) and each
-    /// String attempts to be self.fmt.w `char`s wide.
-    pub fn render(&mut self) -> Vec<String> {
-        // TODO use iterators??
-        //
-        // (self.position.0..0).map(|i| {
-        //     self.wrap(i).iter()
-        // }).flatten().drop(self.position.1).take_up_to(self.h)
-        //
-        // seems to me we could do some clever stuff with iterators, yeah.
-
-        let lines_wanted = self.h;
-        let fmt = self.fmt;
-
-        if self.history.len() > 0 {
-            // Here we have a CONFUSING TANGLE OF ITERATORS.
-            //
-            // This does exactly what I want, but it's probably kind of hard to read.  In fact,
-            // I've even kind of confused myself.  Sorry?
-
-            let v: Vec<String> = (0..self.position.0+1).rev().map(|i| {
-                // For every line in history, going backwards from the most recent...
-                self.wrap(i).expect("wrap(i) in render()").into_iter().rev()
-            }).flatten().map(|l| l.text).chain(std::iter::repeat(" ".repeat(fmt.w)))
-              .take(lines_wanted).collect();
-
-            // We needed to reverse the final iterator but take() isn't a DoubleEndedIterator.  So I
-            // have to consume the Vec, reverse that iterator and collect it again.  Hopefully this
-            // doesn't hurt performance too much.
-            v.into_iter().rev().collect()
-        } else {
-            std::iter::repeat(" ".repeat(fmt.w)).take(self.h).collect()
-        }
-    }
-}

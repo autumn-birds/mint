@@ -72,6 +72,7 @@ impl ConnectionInterface for TcpConnectionManager {
     fn start_connection(&mut self, address: String) -> Result<ConnectionID, String> {
         let cid = self.last_connection_id;
 
+        // TODO: Support something fancier, e.g., that looks up DNS.
         let addr: SocketAddr = match address.as_str().parse() {
             Ok(addr) => addr,
             Err(_) => { return Err(format!("Couldn't parse {} as an address", address)) },
