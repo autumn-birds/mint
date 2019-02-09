@@ -1,7 +1,6 @@
 
 use crate::meta::{Event, ConnectionInterface, EventSource, ConnectionID};
 
-extern crate mio;
 use mio::{Events, Poll, Ready, PollOpt, Token};
 use mio::net::TcpStream;
 

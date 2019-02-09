@@ -1,9 +1,6 @@
-extern crate termion; 
-
 use std::io::Write;
 use std::collections::BTreeSet;
 
-extern crate fnv;
 use fnv::FnvHashMap;
 
 #[derive(Copy, Clone, PartialEq, Eq)]

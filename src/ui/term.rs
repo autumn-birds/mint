@@ -5,16 +5,12 @@ use std::io::{Write, stdout, stdin};
 use std::io;
 use std::thread;
 
-extern crate termion;
 use termion::event::Key;
 use termion::raw::IntoRawMode;
 use termion::screen::AlternateScreen;
 use termion::input::TermRead;
 
-extern crate signal_hook;
 use signal_hook::iterator::Signals;
-
-extern crate libc;
 
 pub mod screen;
 // TODO: We should just scrape the `Command' type out. It's pointless indirection and introduces
