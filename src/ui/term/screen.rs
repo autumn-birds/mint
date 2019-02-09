@@ -226,14 +226,6 @@ impl WrappedView {
     /// this view.  The Vec is guaranteed to be self.h items long (index 0 = top of view) and each
     /// String attempts to be self.fmt.w `char`s wide.
     pub fn render(&mut self) -> Vec<String> {
-        // TODO use iterators??
-        //
-        // (self.position.0..0).map(|i| {
-        //     self.wrap(i).iter()
-        // }).flatten().drop(self.position.1).take_up_to(self.h)
-        //
-        // seems to me we could do some clever stuff with iterators, yeah.
-
         let lines_wanted = self.h;
         let fmt = self.fmt;
 
