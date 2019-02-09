@@ -20,6 +20,8 @@ pub enum Event {
     ServerText { line: String, which: ConnectionID },
     ConnectionStart { which: ConnectionID },
     ConnectionEnd { which: ConnectionID, reason: String },
+
+    QuitRequest,
 }
 
 // Objects that generate Events impl this.

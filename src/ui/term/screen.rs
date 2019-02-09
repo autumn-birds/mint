@@ -1,4 +1,6 @@
 extern crate termion; 
+
+use std::io::Write;
 use std::collections::BTreeSet;
 
 extern crate fnv;
@@ -188,6 +190,11 @@ impl WrappedView {
         }
     }
 
+    pub fn resize(&mut self, w: usize, h: usize) {
+        self.h = h;
+        self.fmt.w = w;
+    }
+
     /// Add a line to the View.
     pub fn push(&mut self, line: String) {
         let current_histlen = self.history.len();
@@ -351,7 +358,7 @@ impl DamageBuffer {
         }
     }
 
-    pub fn redraw(&mut self) {
+    pub fn redraw(&mut self, term: &mut impl Write) -> std::io::Result<()> {
         // TODO: take something that can be write!() to
         let mut last_point = Point { x:0, y:0 };
         print!("{}", termion::cursor::Goto(1,1));
@@ -369,17 +376,17 @@ impl DamageBuffer {
         // branch, but that seems like it'd be slower.  I should probably try doing it anyway.
 
         if self.clear_all {
-            print!("{}", termion::clear::All);
+            term.write(format!("{}", termion::clear::All).as_bytes())?;
         }
 
         if self.redraw_all {
             for y in 0..self.h {
                 for x in 0..self.w {
                     if y != last_point.y || x as isize - last_point.x as isize != 1 {
-                        print!("{}", termion::cursor::Goto((x+1) as u16, (y+1) as u16));
+                        term.write(format!("{}", termion::cursor::Goto((x+1) as u16, (y+1) as u16)).as_bytes())?;
                     }
 
-                    print!("{}", self.buffer[y * self.w + x]);
+                    term.write(format!("{}", self.buffer[y * self.w + x]).as_bytes())?;
                     last_point.x = x; last_point.y = y;
                 }
             }
@@ -390,10 +397,10 @@ impl DamageBuffer {
                 // the right of the previous one, we can just write them out without jumping.  If
                 // we *aren't* exactly one cell to the right of whatever we drew last, we jump.
                 if *y != last_point.y || *x as isize - last_point.x as isize != 1 {
-                    print!("{}", termion::cursor::Goto((x+1) as u16, (y+1) as u16));
+                    term.write(format!("{}", termion::cursor::Goto((x+1) as u16, (y+1) as u16)).as_bytes())?;
                 }
 
-                print!("{}", self.buffer[y * self.w + x]);
+                term.write(format!("{}", self.buffer[y * self.w + x]).as_bytes())?;
                 last_point.x = *x; last_point.y = *y;
             }
         }
@@ -401,6 +408,8 @@ impl DamageBuffer {
         self.points_to_draw.clear();
         self.redraw_all = false;
         self.clear_all = false;
+
+        term.flush()
     }
 }
 
