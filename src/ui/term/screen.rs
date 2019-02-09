@@ -17,6 +17,21 @@ struct ScreenLine {
     for_opts: FmtOpts,
 }
 
+/// Return a version of `text` that is exactly `width` chars long.  Truncates if it is too long,
+/// and appends space characters if it is not long enough.
+fn force_width(mut text: String, width: usize) -> String {
+    // TODO: Do this in a less stupid way...
+    while text.len() > width {
+        text.pop();
+    }
+
+    while text.len() < width {
+        text.push(' ');
+    }
+
+    text
+}
+
 fn format(text: String, opts: FmtOpts) -> Vec<ScreenLine> {
     let mut result = vec![];
 
@@ -113,7 +128,7 @@ fn format(text: String, opts: FmtOpts) -> Vec<ScreenLine> {
             }
 
             result.push(ScreenLine {
-                text: line,
+                text: force_width(line, opts.w),
                 for_opts: opts,
             });
         }
@@ -132,7 +147,7 @@ fn format(text: String, opts: FmtOpts) -> Vec<ScreenLine> {
 
         last_line.push_str(last_chunk);
         result.push(ScreenLine {
-            text: last_line,
+            text: force_width(last_line, opts.w),
             for_opts: opts,
         });
     }
