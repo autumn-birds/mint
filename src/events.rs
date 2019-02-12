@@ -1,13 +1,58 @@
 
-use crate::meta::{Event, EventSource, EventManager};
+use crate::meta::{Event, EventSource, EventManager, Channel};
 
 use std::thread;
 use std::thread::JoinHandle;
 use std::sync::mpsc;
 
+/// Implementation of Channel using std::mpsc and tags of type `usize`.
+struct DataChannel<T> {
+    rx: Option<mpsc::Receiver<(usize, T)>>,
+    tx: mpsc::Sender<(usize, T)>,
+    tag: usize,
+    is_rx: bool,
+}
+
+impl<T> Channel<usize, T> for DataChannel<T> {
+    fn send(&mut self, value: T) -> Result<(), ()> {
+        if self.is_rx {
+            panic!("Tried to send() down RX end of a Channel.");
+        }
+
+        self.tx.send((self.tag, value));
+    }
+
+    fn recv(&mut self, value: T) -> (usize, T) {
+        match self.rx {
+            Some(rx) => rx.recv(),
+            None => { panic!("Tried to recv() from TX end of a Channel."); }
+        }
+    }
+
+    fn new(&mut self, tag: usize) -> DataChannel {
+        let (tx, rx) = mpsc::channel::<(usize, T)>();
+        DataChannel {
+            rx: Some(rx),
+            tx,
+            tag,
+            is_rx: true
+        }
+    }
+
+    fn get_tx(&mut self) -> Channel {
+        DataChannel {
+            rx: None,
+            tx: self.tx.clone(),
+            tag: self.tag,
+            is_rx: false
+        }
+    }
+}
+
+/// System to manage threads listening for data, process the data in an orderly fashion and return
+/// Events to the caller.
 pub struct ThreadedManager {
     channel_rx: mpsc::Receiver<Event>,
-    channel_tx: mpsc::Sender<Event>,
     threads: Vec<JoinHandle<()>>,
 }
 
