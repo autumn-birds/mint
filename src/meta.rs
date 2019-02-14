@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub type ConnectionID = usize;
 pub type WindowID = usize;
@@ -21,56 +23,47 @@ pub enum Event {
     ConnectionStart { which: ConnectionID },
     ConnectionEnd { which: ConnectionID, reason: String },
 
+    /// A serious internal problem, e.g., a listening thread panicked or died.
+    InternalError { what: String },
     QuitRequest,
 }
 
-/// Objects that generate Events by blocking on I/O or other similar activities in a thread impl
-/// this trait.  The generic parameter refers to the data type that is passed back, internally,
-/// from the listening thread to the callback.
-pub trait EventSource<T> {
+/// Objects that generate Events in response to I/O or other similar sources of data implement
+/// this trait.
+pub trait EventSource {
     /// Callback function to handle a chunk of raw data from the listener thread and return any
     /// relevant Events generated.  If no Events are generated, just return vec![].
-    fn process<T>(&mut self, data: T) -> Vec<Event>;
+    fn process(&mut self) -> Vec<Event>;
 
     /// Return a Listener object containing the required state and functionality to listen for data
     /// in another thread.
-    fn get_listener<T>(&mut self) -> Listener<T>;
+    fn get_listener(&mut self) -> Listener;
 }
 
 /// Object encapsulating the state and functionality for listening for new data, I/O, file writes,
 /// or whatever else.  This thread should perform only minimal processing; it must return its data
-/// by pushing to the `channel` as soon as reasonably possible.
-pub trait Listener<T> {
-    fn run(&mut self, channel: std::sync::mpsc::Sender<Event>);
+/// by some internal method (probably a Mutex shared by the parent EventSource...)
+pub trait Listener {
+    /// This method should listen for data, transfer it into the associated EventSource by whatever
+    /// synchronization method the implementor chooses, and page the ReadinessPager when either
+    /// this has been done and the data needs to be processed (by the EventSource), or an error
+    /// occurs.
+    fn run(&mut self, flag: ReadinessPager);
 }
 
-/// A type encapsulating inter-thread channels.  This is present mainly to allow various sources of
-/// data sent along one channel to be disambiguated by the EventManager, but it also abstracts the
-/// specific API used.  The type T is the data to be sent along the channel and the type I defines
-/// what shall be used for the unique identifier.
-pub trait Channel<I, T>
-    where I: Sync + Send,
-          T: Sync + Send {
-    /// Send a message along the channel.  This routine should never be implemented in such a
-    /// fashion that it blocks.  It is expected to panic if you call it on the RX end of the
-    /// channel.
-    fn send(&mut self, value: T) -> Result<(), ()>;
+/// Object allowing its owner to notify the parent thread that either data has been successfully
+/// read and needs to be processed, or an error occurred.
+pub trait ReadinessPager {
+    /// Notify the thread that data needs to be processed.
+    fn ok(&mut self);
 
-    /// Receive the next message from the channel, or block until a message arrives if none are
-    /// available currently.  This function is expected to panic if you call it on the TX end of the
-    /// channel.
-    fn recv(&mut self) -> (I, T);
-
-    /// Construct a new Channel object.
-    fn new(&mut self, tag: I) -> Self;
-
-    /// Return a clone of the channel, suitable for send()ing data along.
-    fn get_tx(&mut self) -> Self;
+    /// Notify the thread of an error.  Provide ideally a human-readable error message.
+    fn err(&mut self, why: String);
 }
 
 /// Trait implemented by an object that manages various sources of Events.
 pub trait EventManager {
-    fn start_source(&mut self, src: Box<EventSource + Send>);
+    fn start_source(&mut self, src: Rc<RefCell<Box<EventSource>>>);
     fn next_event(&mut self) -> Result<Event, String>;
 }
 
