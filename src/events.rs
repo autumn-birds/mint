@@ -60,15 +60,13 @@ impl<I> ReadinessPager for Pager<I>
     }
 }
 
-type ESrc = Box<EventSource>;
-
 /// System to manage threads listening for data, process the data in an orderly fashion and return
 /// Events to the caller.
 pub struct ThreadedManager {
     // We're using usize to disambiguate between the EventSources--since we're going to be pushing them
     // onto a Vec anyway and we don't plan to ever toss out any old entries.
     endpoint: Listener<usize>,
-    sources: Vec<Rc<RefCell<ESrc>>>,
+    sources: Vec<Rc<RefCell<EventSource>>>,
     // Has a fatal error occurred?  (If so, we want to refuse to do anything.)
     poisoned: bool,
     // Any time we receive more than one event, we 'cache' the events so that we can return one at
@@ -93,7 +91,7 @@ impl EventManager for ThreadedManager {
     /// wrapping it internally because the caller needs to maintain a handle to the *specific*
     /// implementation in some cases, and if the only remaining reference is a dyn EventSource-type
     /// object, you won't be able to access anything that isn't a generic EventSource method.
-    fn start_source(&mut self, mut src: Rc<RefCell<Box<EventSource>>>) {
+    fn start_source(&mut self, mut src: Rc<RefCell<EventSource>>) {
         let new_id: usize = self.sources.len();
         // Note that len = index of last element + 1 (since indexes start at zero) and so is also
         // the index of the next element we'll insert into any given list.

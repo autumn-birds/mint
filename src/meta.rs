@@ -63,7 +63,7 @@ pub trait ReadinessPager {
 
 /// Trait implemented by an object that manages various sources of Events.
 pub trait EventManager {
-    fn start_source(&mut self, src: Rc<RefCell<Box<EventSource>>>);
+    fn start_source(&mut self, src: Rc<RefCell<EventSource>>);
     fn next_event(&mut self) -> Result<Event, String>;
 }
 
@@ -96,7 +96,5 @@ pub trait ConnectionInterface {
     fn start_connection(&mut self, address: String) -> Result<ConnectionID, String>;
     fn stop_connection(&mut self, which: ConnectionID) -> Result<(), ()>;
     fn write_to_connection(&mut self, which: ConnectionID, what: String) -> Result<(), ()>;
-
-    fn listener(&mut self) -> Box<EventSource + Send>;
 }
 

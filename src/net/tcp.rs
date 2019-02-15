@@ -1,5 +1,5 @@
 
-use crate::meta::{Event, ConnectionInterface, EventSource, ConnectionID};
+use crate::meta::{Event, ConnectionInterface, EventSource, ConnectionID, ReadinessPager, Listener};
 
 use mio::{Events, Poll, Ready, PollOpt, Token};
 use mio::net::TcpStream;
@@ -12,6 +12,14 @@ use std::io::Read;
 
 const BUFFER_SIZE: usize = 4096;
 
+/// Internal event type for TCP connection data and/or errors.
+enum LinkEvt {
+    Data(usize, Vec<u8>),
+    Error(usize),
+    Eof(usize),
+}
+
+/// EventSource for TCP connections.
 pub struct TcpConnectionManager {
     links: HashMap<ConnectionID, TcpStream>,
     last_connection_id: ConnectionID,
@@ -31,18 +39,20 @@ pub struct TcpConnectionManager {
     socketreg_sr: mio::SetReadiness,
     // This is in an Option for the same reason.
     socketreg_alert: Option<mio::Registration>,
+
+    // This allows us to receive raw data to process from our Listener.
+    listener_rx: mpsc::Receiver<LinkEvt>,
+    listener_tx: mpsc::Sender<LinkEvt>,
 }
 
-// This struct (and its implementation) is (the data used by) what runs in another thread to listen
-// for events. See the ThreadedManager code in events.rs.  It has to be a separate struct because
-// otherwise any EventManager objects would want to take ownership of the entire
-// TcpConnectionManager object and move it into a thread, and we can't have that...
+/// Listener impl for TcpConnectionManager.
 struct TcpListener {
     socketreg_rx: mpsc::Receiver<Connection>,
     socketreg_alert: mio::Registration,
+    data_tx: mpsc::Sender<LinkEvt>,
 }
 
-// This struct represents a socket along with its ConnectionID.
+/// This struct represents a socket along with its ConnectionID.
 struct Connection {
     socket: TcpStream,
     cid: ConnectionID,
@@ -52,6 +62,7 @@ impl TcpConnectionManager {
     pub fn new() -> TcpConnectionManager {
         let (registration, set_readiness) = mio::Registration::new2();
         let (tx, rx) = mpsc::channel::<Connection>();
+        let (tx2, rx2) = mpsc::channel::<LinkEvt>();
 
         return TcpConnectionManager {
             links: HashMap::new(),
@@ -63,6 +74,9 @@ impl TcpConnectionManager {
             socketreg_rx: Some(rx),
             socketreg_sr: set_readiness,
             socketreg_alert: Some(registration),
+
+            listener_tx: tx2,
+            listener_rx: rx2,
         }
     }
 }
@@ -106,19 +120,54 @@ impl ConnectionInterface for TcpConnectionManager {
         Ok(())
     }
 
-    fn listener(&mut self) -> Box<EventSource + Send> {
+}
+
+impl EventSource for TcpConnectionManager {
+    fn get_listener(&mut self) -> Listener {
         match (self.socketreg_rx.take(), self.socketreg_alert.take()) {
-            (Some(rx), Some(alert)) => Box::new(TcpListener {
+            (Some(rx), Some(alert)) => TcpListener {
                 socketreg_rx: rx,
                 socketreg_alert: alert,
-            }),
+                data_tx: self.listener_tx.clone(),
+            },
             _ => { panic!("Cannot call listener() on ConnectionInterface more than once.") }
         }
     }
+
+    fn process(&mut self) -> Vec<Event> {
+        let queue = vec![];
+
+        loop {
+            match self.data_rx.try_recv() {
+                Some(LinkEvt::Data(cid, what)) => {
+                    // TODO: Buffering until EOL
+                    queue.push(Event::ServerText {
+                        which: cid,
+                        line: String::from_utf8_lossy(what).to_string()
+                    });
+                },
+                Some(LinkEvt::Error(cid)) => {
+                    queue.push(Event::ConnectionEnd {
+                        which: cid,
+                        reason: format!("Error trying to read from the TcpStream"),
+                    });
+                },
+                Some(LinkEvt::Eof(cid)) => {
+                    queue.push(Event::ConnectionEnd {
+                        which: cid,
+                        reason: format!("End of connection"),
+                    });
+                },
+                None => break,
+            }
+        }
+
+        queue
+    }
 }
 
-impl EventSource for TcpListener {
-    fn run(&mut self, channel: std::sync::mpsc::Sender<Event>) {
+impl Listener for TcpListener {
+    fn run(&mut self, flag: ReadinessPager) {
         // TODO: See the comment in ThreadedManager (events.rs).  Make this thread return an
         // appropriate Result type to where we can use `?` unstead of unwrap(), and watch for that
         // as noted there.
@@ -126,6 +175,8 @@ impl EventSource for TcpListener {
         let mut events = Events::with_capacity(128);
         let mut links = HashMap::new();
 
+        // Register the alert object we're using to wake up when it's time to add a socket to our
+        // inventory (e.g. register it with the poll.)
         poll.register(&self.socketreg_alert, Token(0), Ready::readable(), PollOpt::edge()).unwrap();
 
         loop {
@@ -162,18 +213,18 @@ impl EventSource for TcpListener {
                                 // of our own internal state here.)
                                 poll.deregister(links.get(&cid).expect("links.get"));
                                 links.remove(&cid);
-                                channel.send(Event::ConnectionEnd {
-                                    which: cid,
-                                    reason: "Socket closed.".to_string(),
-                                }).expect("Couldn't send ConnectionEnd");
+                                self.data_tx.send(LinkEvt::Eof(cid))
+                                    .expect("Couldn't send Eof back to main thread");
+                                flag.ok();
                                 break;
                             },
                             Ok(num_bytes) => {
                                 // TODO: Actual handling of, like, lines (e.g. buffer until \n)
-                                channel.send(Event::ServerText {
-                                    which: cid,
-                                    line: String::from_utf8_lossy(&buffer[..num_bytes]).to_string(),
-                                }).expect("Couldn't send ServerText");
+                                let mut vec = Vec::new();
+                                vec.extend_from_slice(&buffer[..num_bytes]);
+                                self.data_tx.send((cid, vec))
+                                    .expect("Couldn't send Data back to main thread");
+                                flag.ok();
                             },
                             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                                 // The socket is not ready anymore, stop reading
@@ -185,10 +236,9 @@ impl EventSource for TcpListener {
                                 // we) do anything to make sure e.g. close()ing?
                                 poll.deregister(links.get(&cid).expect("links.get"));
                                 links.remove(&cid);
-                                channel.send(Event::ConnectionEnd {
-                                    which: cid,
-                                    reason: format!("Unexpected read error: {:?}", e),
-                                }).expect("Couldn't send ConnectionEnd on unexpected read error");
+                                self.data_tx.send(LinkEvt::Error(cid))
+                                    .expect("Couldn't send Error back to main thread");
+                                flag.ok();
                                 break;
                             },
                         }
