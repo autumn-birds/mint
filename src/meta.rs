@@ -28,16 +28,18 @@ pub enum Event {
     QuitRequest,
 }
 
-/// Objects that generate Events in response to I/O or other similar sources of data implement
-/// this trait.
+/// Objects that generate Events in response to I/O or other similar sources of data, specifically
+/// those that do so by listening on one or more threads, implement this trait.  Communication
+/// between the thread(s) and the EventSource object proper (which is always owned by the main
+/// thread) is assumed to be handled by the implementation in whatever way it sees fit.
 pub trait EventSource {
     /// Callback function to handle a chunk of raw data from the listener thread and return any
     /// relevant Events generated.  If no Events are generated, just return vec![].
     fn process(&mut self) -> Vec<Event>;
 
-    /// Return a Listener object containing the required state and functionality to listen for data
-    /// in another thread.
-    fn get_listener(&mut self) -> Box<Listener>;
+    /// Return a list of objects representing the state and data required for every individual
+    /// listening thread this EventSource wants to run.
+    fn get_listeners(&mut self) -> Vec<Box<Listener>>;
 }
 
 /// Object encapsulating the state and functionality for listening for new data, I/O, file writes,
@@ -53,7 +55,7 @@ pub trait Listener: Send {
 
 /// Object allowing its owner to notify the parent thread that either data has been successfully
 /// read and needs to be processed, or an error occurred.
-pub trait ReadinessPager {
+pub trait ReadinessPager: Send {
     /// Notify the thread that data needs to be processed.
     fn ok(&mut self);
 

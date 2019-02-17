@@ -92,27 +92,29 @@ impl EventManager for ThreadedManager {
     /// implementation in some cases, and if the only remaining reference is a dyn EventSource-type
     /// object, you won't be able to access anything that isn't a generic EventSource method.
     fn start_source(&mut self, mut src: Rc<RefCell<EventSource>>) {
-        let new_id: usize = self.sources.len();
         // Note that len = index of last element + 1 (since indexes start at zero) and so is also
         // the index of the next element we'll insert into any given list.
-        let listeners_pager = self.endpoint.clone_tx(new_id);
-        let mut listener = src.borrow_mut().get_listener();
+        let new_id: usize = self.sources.len();
 
-        let citizen = thread::spawn(move || {
-            listener.run(Box::new(listeners_pager));
-        });
+        let listeners = src.borrow_mut().get_listeners();
+        for mut listener in listeners {
+            let citizen_pager = self.endpoint.clone_tx(new_id);
+            let citizen = thread::spawn(move || {
+                listener.run(Box::new(citizen_pager));
+            });
 
-        // Check for a badly behaved thread dying in the case that it doesn't actually call err()
-        // on its pager.
-        let mut police_pager = self.endpoint.clone_tx(new_id);
-        let police = thread::spawn(move || {
-            match citizen.join() {
-                // TODO: This is going to be troublesome if/when threads die because we may not
-                // know which thread died from this alone.
-                Ok(_) => { police_pager.err("A thread that should run forever returned!".to_string()); },
-                Err(_) => { police_pager.err("A thread that should not have died died!".to_string()); }
-            }
-        });
+            // Check for a badly behaved thread dying in the case that it doesn't actually call err()
+            // on its pager.
+            let mut police_pager = self.endpoint.clone_tx(new_id);
+            let police = thread::spawn(move || {
+                match citizen.join() {
+                    // TODO: This is going to be troublesome if/when threads die because we may not
+                    // know which thread died from this alone.
+                    Ok(_) => { police_pager.err("A thread that should run forever returned!".to_string()); },
+                    Err(_) => { police_pager.err("A thread that should not have died died!".to_string()); }
+                }
+            });
+        }
 
         self.sources.push(src);
     }

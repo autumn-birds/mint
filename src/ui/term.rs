@@ -70,10 +70,15 @@ impl Drop for TermUiManager {
 }
 
 impl EventSource for TermUiManager {
-    fn get_listener(&mut self) -> Box<Listener> {
-        Box::new(TuiListener {
-            tx: self.tx_template.clone(),
-        })
+    fn get_listeners(&mut self) -> Vec<Box<Listener>> {
+        vec![
+            Box::new(TermionListener {
+                tx: self.tx_template.clone(),
+            }),
+            Box::new(ResizeListener {
+                tx: self.tx_template.clone(),
+            }),
+        ]
     }
 
     fn process(&mut self) -> Vec<Event> {
@@ -148,29 +153,34 @@ enum TermEvent {
     Input { key: Key },
 }
 
-/// Listener for I/O for the TermUiManager.
-struct TuiListener {
+/// Listener for terminal resize events.
+struct ResizeListener {
     tx: Sender<TermEvent>,
 }
 
-impl Listener for TuiListener {
-    fn run(&mut self, flag: Box<ReadinessPager>) {
-        // Just in the spirit of starting bunches and bunches of threads (I know, what a good
-        // idea), we start a subsidiary thread to listen for signals.
-        let sig_tx = self.tx.clone();
+impl Listener for ResizeListener {
+    fn run(&mut self, mut flag: Box<ReadinessPager>) {
         let sigs = Signals::new(&[libc::SIGWINCH]).expect("Couldn't create Signals iterator");
-        thread::spawn(move || {
-            for signal in sigs.forever() {
-                sig_tx.send(TermEvent::Resize);
-            }
-        });
+        for signal in sigs.forever() {
+            self.tx.send(TermEvent::Resize);
+            flag.ok();
+        }
+    }
+}
 
+/// Listener for termion (e.g., key, mouse, etc.) events.
+struct TermionListener {
+    tx: Sender<TermEvent>,
+}
+impl Listener for TermionListener {
+    fn run(&mut self, mut flag: Box<ReadinessPager>) {
         let stdin = stdin();
         for c in stdin.keys() {
             // TODO: In the future, when we have better error handling for EventManaged
             // threads, bounce this back to the parent thread and let it crash properly....?
             let c = c.expect("Couldn't read from stdin?!");
             self.tx.send(TermEvent::Input { key: c });
+            flag.ok();
         }
     }
 }

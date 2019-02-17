@@ -123,16 +123,16 @@ impl ConnectionInterface for TcpConnectionManager {
 }
 
 impl EventSource for TcpConnectionManager {
-    fn get_listener(&mut self) -> Box<Listener> {
+    fn get_listeners(&mut self) -> Vec<Box<Listener>> {
         // Just return an event listener, but we can only do this once as it's not possible to have
         // two rx ends.  (It would actually be a logical error if this was ever called twice on
         // anything I think? Unless you were restarting it...)
         match (self.socketreg_rx.take(), self.socketreg_alert.take()) {
-            (Some(rx), Some(alert)) => Box::new(TcpListener {
+            (Some(rx), Some(alert)) => vec![Box::new(TcpListener {
                 socketreg_rx: rx,
                 socketreg_alert: alert,
                 data_tx: self.listener_tx.clone(),
-            }),
+            })],
             _ => { panic!("Cannot call listener() on ConnectionInterface more than once.") }
         }
     }
