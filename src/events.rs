@@ -16,15 +16,15 @@ enum StateNotice {
 /// Listener for readiness/error notices sent out by child threads.  The type parameter `I`
 /// indicates what type of unique ID to use for disambiguating the events.
 struct Listener<I>
-    where I: Sync + Send {
+    where I: Sync + Send + Copy {
     rx: mpsc::Receiver<(I, StateNotice)>,
     tx: mpsc::Sender<(I, StateNotice)>,
 }
 
 impl<I> Listener<I>
-    where I: Sync + Send {
+    where I: Sync + Send + Copy {
     fn new() -> Listener<I> {
-        let (rx, tx) = mpsc::channel::<I>();
+        let (tx, rx) = mpsc::channel::<(I, StateNotice)>();
         Listener { 
             rx, tx
         }
@@ -44,13 +44,13 @@ impl<I> Listener<I>
 
 /// Implementation of ReadinessPager for the ThreadedManager.
 struct Pager<I>
-    where I: Sync + Send {
+    where I: Sync + Send + Copy {
     tx: mpsc::Sender<(I, StateNotice)>,
     tag: I,
 }
 
 impl<I> ReadinessPager for Pager<I>
-    where I: Sync + Send {
+    where I: Sync + Send + Copy {
     fn ok(&mut self) {
         self.tx.send((self.tag, StateNotice::Ready)).expect("Error send()ing to notify EventManager of readiness");
     }
@@ -78,7 +78,7 @@ impl ThreadedManager {
     pub fn new() -> ThreadedManager {
         let (tx, rx) = mpsc::channel::<Event>();
         ThreadedManager {
-            endpoint: Listener::new::<usize>(),
+            endpoint: Listener::new(),
             sources: vec![],
             poisoned: false,
             events_waiting: VecDeque::new(),
@@ -96,15 +96,15 @@ impl EventManager for ThreadedManager {
         // Note that len = index of last element + 1 (since indexes start at zero) and so is also
         // the index of the next element we'll insert into any given list.
         let listeners_pager = self.endpoint.clone_tx(new_id);
-        let listener = src.borrow_mut().get_listener();
+        let mut listener = src.borrow_mut().get_listener();
 
         let citizen = thread::spawn(move || {
-            listener.run(listeners_pager);
+            listener.run(Box::new(listeners_pager));
         });
 
         // Check for a badly behaved thread dying in the case that it doesn't actually call err()
         // on its pager.
-        let police_pager = self.endpoint.clone_tx(new_id);
+        let mut police_pager = self.endpoint.clone_tx(new_id);
         let police = thread::spawn(move || {
             match citizen.join() {
                 // TODO: This is going to be troublesome if/when threads die because we may not
@@ -121,20 +121,17 @@ impl EventManager for ThreadedManager {
     /// it will wait for an Event to arrive.
     fn next_event(&mut self) -> Result<Event, String> {
         while self.events_waiting.len() < 1 {
-            if self.src.len() < 1 {
+            if self.sources.len() < 1 {
                 return Err("No threads are running; would block forever".to_string());
             } else if self.poisoned {
                 return Err("A fatal error has already occurred".to_string());
             } else {
-                let next_sig = match self.endpoint.recv() {
-                    Ok(x) => x,
-                    Err(_) => return Err("recv() error (no more messages ever?)".to_string()),
-                };
-
-                match next_sig {
+                match self.endpoint.recv() {
                     (id, StateNotice::Ready) => {
                         let mut results = self.sources[id].borrow_mut().process();
-                        results.for_each(|result| self.events_waiting.push_back(result));
+                        for result in results {
+                            self.events_waiting.push_back(result);
+                        }
                     },
                     (id, StateNotice::Error(bad_things)) => {
                         self.poisoned = true;
@@ -144,7 +141,9 @@ impl EventManager for ThreadedManager {
             }
         }
 
-        Ok(self.events_waiting.pop_front())
+        // The loop above should only exit if self.events_waiting.len() is 1 or more, so
+        // pop_front() should be guaranteed to function and unwrap() should be safe.
+        Ok(self.events_waiting.pop_front().unwrap())
     }
 }
 

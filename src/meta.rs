@@ -37,18 +37,18 @@ pub trait EventSource {
 
     /// Return a Listener object containing the required state and functionality to listen for data
     /// in another thread.
-    fn get_listener(&mut self) -> Listener;
+    fn get_listener(&mut self) -> Box<Listener>;
 }
 
 /// Object encapsulating the state and functionality for listening for new data, I/O, file writes,
 /// or whatever else.  This thread should perform only minimal processing; it must return its data
 /// by some internal method (probably a Mutex shared by the parent EventSource...)
-pub trait Listener {
+pub trait Listener: Send {
     /// This method should listen for data, transfer it into the associated EventSource by whatever
     /// synchronization method the implementor chooses, and page the ReadinessPager when either
     /// this has been done and the data needs to be processed (by the EventSource), or an error
     /// occurs.
-    fn run(&mut self, flag: ReadinessPager);
+    fn run(&mut self, flag: Box<ReadinessPager>);
 }
 
 /// Object allowing its owner to notify the parent thread that either data has been successfully
@@ -81,8 +81,6 @@ pub trait UserInterface {
     // is surface to the user, is the UI code's business.
     fn push_to_window(&mut self, window: String, line: String) -> Result<(), ()>;
     fn register_command(&mut self, c: Command);
-
-    fn listener(&mut self) -> Box<EventSource + Send>;
 }
 
 // This type of object knows about servers and contains the low-level logic for connecting and

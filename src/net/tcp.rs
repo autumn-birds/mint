@@ -123,42 +123,48 @@ impl ConnectionInterface for TcpConnectionManager {
 }
 
 impl EventSource for TcpConnectionManager {
-    fn get_listener(&mut self) -> Listener {
+    fn get_listener(&mut self) -> Box<Listener> {
+        // Just return an event listener, but we can only do this once as it's not possible to have
+        // two rx ends.  (It would actually be a logical error if this was ever called twice on
+        // anything I think? Unless you were restarting it...)
         match (self.socketreg_rx.take(), self.socketreg_alert.take()) {
-            (Some(rx), Some(alert)) => TcpListener {
+            (Some(rx), Some(alert)) => Box::new(TcpListener {
                 socketreg_rx: rx,
                 socketreg_alert: alert,
                 data_tx: self.listener_tx.clone(),
-            },
+            }),
             _ => { panic!("Cannot call listener() on ConnectionInterface more than once.") }
         }
     }
 
     fn process(&mut self) -> Vec<Event> {
-        let queue = vec![];
+        // Process input from the thread... this mostly just transcribes the input into Events
+        // right now, but it needs to get more complicated and handle at least EOL buffering and
+        // Telnet, later.
+        let mut queue = vec![];
 
         loop {
-            match self.data_rx.try_recv() {
-                Some(LinkEvt::Data(cid, what)) => {
+            match self.listener_rx.try_recv() {
+                Ok(LinkEvt::Data(cid, what)) => {
                     // TODO: Buffering until EOL
                     queue.push(Event::ServerText {
                         which: cid,
-                        line: String::from_utf8_lossy(what).to_string()
+                        line: String::from_utf8_lossy(&what).to_string()
                     });
                 },
-                Some(LinkEvt::Error(cid)) => {
+                Ok(LinkEvt::Error(cid)) => {
                     queue.push(Event::ConnectionEnd {
                         which: cid,
                         reason: format!("Error trying to read from the TcpStream"),
                     });
                 },
-                Some(LinkEvt::Eof(cid)) => {
+                Ok(LinkEvt::Eof(cid)) => {
                     queue.push(Event::ConnectionEnd {
                         which: cid,
                         reason: format!("End of connection"),
                     });
                 },
-                None => break,
+                Err(_) => break,
             }
         }
 
@@ -167,7 +173,7 @@ impl EventSource for TcpConnectionManager {
 }
 
 impl Listener for TcpListener {
-    fn run(&mut self, flag: ReadinessPager) {
+    fn run(&mut self, mut flag: Box<ReadinessPager>) {
         // TODO: See the comment in ThreadedManager (events.rs).  Make this thread return an
         // appropriate Result type to where we can use `?` unstead of unwrap(), and watch for that
         // as noted there.
@@ -222,7 +228,7 @@ impl Listener for TcpListener {
                                 // TODO: Actual handling of, like, lines (e.g. buffer until \n)
                                 let mut vec = Vec::new();
                                 vec.extend_from_slice(&buffer[..num_bytes]);
-                                self.data_tx.send((cid, vec))
+                                self.data_tx.send(LinkEvt::Data(cid, vec))
                                     .expect("Couldn't send Data back to main thread");
                                 flag.ok();
                             },
