@@ -7,6 +7,11 @@ use mint::net::tcp::TcpConnectionManager;
 use mint::ui::term::TermUiManager;
 
 use std::env;
+use std::{cell::RefCell, rc::Rc};
+
+fn wrap<T>(x: T) -> Rc<RefCell<T>> {
+    Rc::new(RefCell::new(x))
+}
 
 fn main() {
     let address: String;
@@ -18,24 +23,24 @@ fn main() {
 
     let mut manager = ThreadedManager::new();
 
-    let mut tcp = TcpConnectionManager::new();
-    manager.start_source(tcp.listener());
-    tcp.start_connection(address.to_string())
+    let mut tcp = wrap(TcpConnectionManager::new());
+    manager.start_source(tcp.clone());
+    tcp.borrow_mut().start_connection(address.to_string())
          .unwrap();
 
-    let mut tui = TermUiManager::new();
-    manager.start_source(tui.listener());
+    let mut tui = wrap(TermUiManager::new());
+    manager.start_source(tui.clone());
 
     let mut event = manager.next_event();
     loop {
         match event.expect("Error in next_event()") {
             Event::ServerText { line: l, which: c } => {
-                tui.push_to_window("default".to_string(), l);
+                tui.borrow_mut().push_to_window("default".to_string(), l);
             },
             Event::QuitRequest => {
                 break;
             },
-            ref event => { println!("Unhandled event: {:?}", event); },
+            ref event => { println!("Unhandled event: {:?}", event); break; },
         }
         event = manager.next_event();
     }
