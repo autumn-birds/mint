@@ -208,7 +208,13 @@ impl WrappedView {
     }
 
     /// Add a line to the View.
-    pub fn push(&mut self, line: String) {
+    ///
+    /// This function expects that its argument will, logically, be a single line.  If you pass it
+    /// a line with `\n`, `\r` or potentially other similar control characters included, it will
+    /// remove them.
+    pub fn push(&mut self, mut line: String) {
+        line.retain(|c| c != '\n' && c != '\r');
+
         let current_histlen = self.history.len();
         self.history.push(line);
 
