@@ -76,7 +76,6 @@ pub struct ThreadedManager {
 
 impl ThreadedManager {
     pub fn new() -> ThreadedManager {
-        let (tx, rx) = mpsc::channel::<Event>();
         ThreadedManager {
             endpoint: Listener::new(),
             sources: vec![],
@@ -91,7 +90,7 @@ impl EventManager for ThreadedManager {
     /// wrapping it internally because the caller needs to maintain a handle to the *specific*
     /// implementation in some cases, and if the only remaining reference is a dyn EventSource-type
     /// object, you won't be able to access anything that isn't a generic EventSource method.
-    fn start_source(&mut self, mut src: Rc<RefCell<EventSource>>) {
+    fn start_source(&mut self, src: Rc<RefCell<EventSource>>) {
         // Note that len = index of last element + 1 (since indexes start at zero) and so is also
         // the index of the next element we'll insert into any given list.
         let new_id: usize = self.sources.len();
@@ -106,7 +105,7 @@ impl EventManager for ThreadedManager {
             // Check for a badly behaved thread dying in the case that it doesn't actually call err()
             // on its pager.
             let mut police_pager = self.endpoint.clone_tx(new_id);
-            let police = thread::spawn(move || {
+            thread::spawn(move || {
                 match citizen.join() {
                     // TODO: This is going to be troublesome if/when threads die because we may not
                     // know which thread died from this alone.
@@ -130,12 +129,12 @@ impl EventManager for ThreadedManager {
             } else {
                 match self.endpoint.recv() {
                     (id, StateNotice::Ready) => {
-                        let mut results = self.sources[id].borrow_mut().process();
+                        let results = self.sources[id].borrow_mut().process();
                         for result in results {
                             self.events_waiting.push_back(result);
                         }
                     },
-                    (id, StateNotice::Error(bad_things)) => {
+                    (_id, StateNotice::Error(bad_things)) => {
                         self.poisoned = true;
                         self.events_waiting.push_back(Event::InternalError { what: bad_things });
                     },

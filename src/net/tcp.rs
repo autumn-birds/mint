@@ -11,6 +11,8 @@ use std::sync::mpsc;
 use std::io::Read;
 
 const BUFFER_SIZE: usize = 4096;
+// 10 is ASCII newline
+const LINE_SEPARATOR: u8 = 10;
 
 /// Internal event type for TCP connection data and/or errors.
 enum LinkEvt {
@@ -43,6 +45,9 @@ pub struct TcpConnectionManager {
     // This allows us to receive raw data to process from our Listener.
     listener_rx: mpsc::Receiver<LinkEvt>,
     listener_tx: mpsc::Sender<LinkEvt>,
+
+    // A HashMap of vec<u8> used for buffering input from remote servers.
+    input_buffers: HashMap<ConnectionID, Vec<u8>>
 }
 
 /// Listener impl for TcpConnectionManager.
@@ -77,6 +82,8 @@ impl TcpConnectionManager {
 
             listener_tx: tx2,
             listener_rx: rx2,
+
+            input_buffers: HashMap::new(),
         }
     }
 }
@@ -110,12 +117,12 @@ impl ConnectionInterface for TcpConnectionManager {
         Ok(cid)
     }
 
-    fn stop_connection(&mut self, which: ConnectionID) -> Result<(), ()> {
+    fn stop_connection(&mut self, _which: ConnectionID) -> Result<(), ()> {
         // TODO: Implement this
         Ok(())
     }
 
-    fn write_to_connection(&mut self, which: ConnectionID, what: String) -> Result<(), ()> {
+    fn write_to_connection(&mut self, _which: ConnectionID, _what: String) -> Result<(), ()> {
         // TODO: Implement this
         Ok(())
     }
@@ -145,12 +152,20 @@ impl EventSource for TcpConnectionManager {
 
         loop {
             match self.listener_rx.try_recv() {
-                Ok(LinkEvt::Data(cid, what)) => {
-                    // TODO: Buffering until EOL
-                    queue.push(Event::ServerText {
-                        which: cid,
-                        line: String::from_utf8_lossy(&what).to_string()
-                    });
+                Ok(LinkEvt::Data(cid, mut what)) => {
+                    let mut buffer = self.input_buffers.entry(cid).or_insert(Vec::new());
+                    buffer.append(&mut what);
+
+                    // Drain all the *complete* lines out of the buffer and push them into the
+                    // queue as Event::ServerText objects.
+                    while buffer.contains(&LINE_SEPARATOR) {
+                        let line = buffer.split(|c| *c == LINE_SEPARATOR).next().unwrap();
+                        queue.push(Event::ServerText {
+                            which: cid,
+                            line: String::from_utf8_lossy(&line).to_string(),
+                        });
+                        buffer.drain(0..line.len() + 1);
+                    }
                 },
                 Ok(LinkEvt::Error(cid)) => {
                     queue.push(Event::ConnectionEnd {
@@ -236,7 +251,7 @@ impl Listener for TcpListener {
                                 // The socket is not ready anymore, stop reading
                                 break;
                             },
-                            Err(e) => {
+                            Err(_e) => {
                                 // We assume the link wrapped up here--that an error means we
                                 // probably can't keep using it.  TODO: Do we need to (or should
                                 // we) do anything to make sure e.g. close()ing?

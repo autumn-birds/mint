@@ -23,18 +23,18 @@ fn main() {
 
     let mut manager = ThreadedManager::new();
 
-    let mut tcp = wrap(TcpConnectionManager::new());
+    let tcp = wrap(TcpConnectionManager::new());
     manager.start_source(tcp.clone());
     tcp.borrow_mut().start_connection(address.to_string())
          .unwrap();
 
-    let mut tui = wrap(TermUiManager::new());
+    let tui = wrap(TermUiManager::new());
     manager.start_source(tui.clone());
 
     let mut event = manager.next_event();
     loop {
         match event.expect("Error in next_event()") {
-            Event::ServerText { line: l, which: c } => {
+            Event::ServerText { line: l, which: _c } => {
                 tui.borrow_mut().push_to_window("default".to_string(), l);
             },
             Event::QuitRequest => {

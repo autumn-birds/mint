@@ -125,7 +125,7 @@ impl EventSource for TermUiManager {
 
 /// Implements the public API for adding new text data to windows in the user interface.
 impl UserInterface for TermUiManager {
-    fn push_to_window(&mut self, window: String, line: String) -> Result<(), ()> {
+    fn push_to_window(&mut self, _window: String, line: String) -> Result<(), ()> {
         // Just for testing, we throw everything into a single view...  We could
         // ultimately make it a single view that drew in variously filtered ways as
         // well, or multiple views on the same text that could be filtered however you
@@ -142,7 +142,7 @@ impl UserInterface for TermUiManager {
         Ok(())
     }
 
-    fn register_command(&mut self, c: Command) {
+    fn register_command(&mut self, _c: Command) {
         // TODO
     }
 }
@@ -161,7 +161,7 @@ struct ResizeListener {
 impl Listener for ResizeListener {
     fn run(&mut self, mut flag: Box<ReadinessPager>) {
         let sigs = Signals::new(&[libc::SIGWINCH]).expect("Couldn't create Signals iterator");
-        for signal in sigs.forever() {
+        for _signal in sigs.forever() {
             self.tx.send(TermEvent::Resize);
             flag.ok();
         }
