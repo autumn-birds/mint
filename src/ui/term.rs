@@ -13,6 +13,12 @@ use termion::input::TermRead;
 use signal_hook::iterator::Signals;
 
 mod input;
+mod screen;
+// TODO: We should just scrape the `Command' type out. It's pointless indirection and introduces
+// confusion as to what Commands even are, plus the possibility to break stuff less-obviously by
+// changing it.
+use crate::meta::{Event, EventSource, UserInterface, Command, ReadinessPager, Listener};
+
 
 /// Trait for objects that can be conceptualized as a rectangle on a grid of characters and drawn
 /// on screen.
@@ -34,12 +40,6 @@ pub trait Window {
     fn set_width(&mut self, new_w: usize);
     fn set_height(&mut self, new_h: usize);
 }
-
-pub mod screen;
-// TODO: We should just scrape the `Command' type out. It's pointless indirection and introduces
-// confusion as to what Commands even are, plus the possibility to break stuff less-obviously by
-// changing it.
-use crate::meta::{Event, EventSource, UserInterface, Command, ReadinessPager, Listener};
 
 /// Source for events (e.g. a line of text input) originating from a terminal-based user interface,
 /// and high-level implementation of that interface.
