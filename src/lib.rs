@@ -1,3 +1,5 @@
+#![deny(unused_must_use)]
+
 pub mod meta;
 pub mod events;
 pub mod net;

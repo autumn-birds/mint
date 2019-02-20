@@ -232,7 +232,7 @@ impl Listener for TcpListener {
                                 // ideal, because it means we have a non-obvious API that the
                                 // outside world needs to honor.  Ideally we'd be able to tend all
                                 // of our own internal state here.)
-                                poll.deregister(links.get(&cid).expect("links.get"));
+                                poll.deregister(links.get(&cid).expect("links.get")).expect("deregister");
                                 links.remove(&cid);
                                 self.data_tx.send(LinkEvt::Eof(cid))
                                     .expect("Couldn't send Eof back to main thread");
@@ -255,7 +255,7 @@ impl Listener for TcpListener {
                                 // We assume the link wrapped up here--that an error means we
                                 // probably can't keep using it.  TODO: Do we need to (or should
                                 // we) do anything to make sure e.g. close()ing?
-                                poll.deregister(links.get(&cid).expect("links.get"));
+                                poll.deregister(links.get(&cid).expect("links.get")).expect("deregister");
                                 links.remove(&cid);
                                 self.data_tx.send(LinkEvt::Error(cid))
                                     .expect("Couldn't send Error back to main thread");

@@ -377,7 +377,6 @@ impl DamageBuffer {
     }
 
     pub fn redraw(&mut self, term: &mut impl Write) -> std::io::Result<()> {
-        // TODO: take something that can be write!() to
         let mut last_point = Point { x:0, y:0 };
         print!("{}", termion::cursor::Goto(1,1));
 

@@ -162,7 +162,7 @@ impl Listener for ResizeListener {
     fn run(&mut self, mut flag: Box<ReadinessPager>) {
         let sigs = Signals::new(&[libc::SIGWINCH]).expect("Couldn't create Signals iterator");
         for _signal in sigs.forever() {
-            self.tx.send(TermEvent::Resize);
+            self.tx.send(TermEvent::Resize).expect("error sending TermEvent::Resize");
             flag.ok();
         }
     }
@@ -179,7 +179,7 @@ impl Listener for TermionListener {
             // TODO: In the future, when we have better error handling for EventManaged
             // threads, bounce this back to the parent thread and let it crash properly....?
             let c = c.expect("Couldn't read from stdin?!");
-            self.tx.send(TermEvent::Input { key: c });
+            self.tx.send(TermEvent::Input { key: c }).expect("error sending TermEvent::Input");
             flag.ok();
         }
     }
