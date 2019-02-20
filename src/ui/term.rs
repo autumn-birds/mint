@@ -12,6 +12,29 @@ use termion::input::TermRead;
 
 use signal_hook::iterator::Signals;
 
+mod input;
+
+/// Trait for objects that can be conceptualized as a rectangle on a grid of characters and drawn
+/// on screen.
+pub trait Window {
+    fn draw(&self) -> Vec<String>;
+    
+    /// Return (width, height).
+    fn get_size(&self) -> (usize, usize);
+
+    /// Return (x, y), 1-indexed to harmonise with termion's expectations.  Unless the user will be
+    /// interacting with this in a way that requires cursor positioning/movement, it's safe to just
+    /// return (1,1) here.
+    fn get_cursor_pos(&self) -> (usize, usize);
+
+    // These are implemented as two functions because some objects (e.g. the input line) will want
+    // to dynamically decide one of these values (in the input line's case, based on how much text
+    // is present and width it's been asked to render to), so those objects are allowed to just
+    // panic!() if you try to set a dynamic value.
+    fn set_width(&mut self, new_w: usize);
+    fn set_height(&mut self, new_h: usize);
+}
+
 pub mod screen;
 // TODO: We should just scrape the `Command' type out. It's pointless indirection and introduces
 // confusion as to what Commands even are, plus the possibility to break stuff less-obviously by

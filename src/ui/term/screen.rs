@@ -3,6 +3,8 @@ use std::collections::BTreeSet;
 
 use fnv::FnvHashMap;
 
+use crate::utils::force_width;
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 struct FmtOpts {
     w: usize,
@@ -15,21 +17,6 @@ struct FmtOpts {
 struct ScreenLine {
     text: String,
     for_opts: FmtOpts,
-}
-
-/// Return a version of `text` that is exactly `width` chars long.  Truncates if it is too long,
-/// and appends space characters if it is not long enough.
-fn force_width(mut text: String, width: usize) -> String {
-    // TODO: Do this in a less stupid way...
-    while text.len() > width {
-        text.pop();
-    }
-
-    while text.len() < width {
-        text.push(' ');
-    }
-
-    text
 }
 
 fn format(text: String, opts: FmtOpts) -> Vec<ScreenLine> {
@@ -429,5 +416,4 @@ impl DamageBuffer {
         term.flush()
     }
 }
-
 
