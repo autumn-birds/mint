@@ -135,9 +135,15 @@ impl EventSource for TermUiManager {
                 Ok(TermEvent::Input { key: k }) => {
                     match k {
                         Key::Ctrl('c') => { out.push(Event::QuitRequest) },
+                        Key::Ctrl('b') => { self.input.move_cursor(-1) },
+                        Key::Left      => { self.input.move_cursor(-1) },
+                        Key::Ctrl('f') => { self.input.move_cursor(1) },
+                        Key::Right     => { self.input.move_cursor(-1) },
+                        Key::Char(chr) => { self.input.insert_char(chr) },
                         // Obviously, huge TODO here.
                         _ => { },
                     };
+                    self.redraw();
                 },
             }
         }
