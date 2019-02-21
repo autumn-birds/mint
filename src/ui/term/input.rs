@@ -4,7 +4,7 @@ use crate::ui::term::Window;
 use crate::utils::force_width;
 
 /// UI for input/editing of a single line of text on the terminal.
-struct InputLine {
+pub struct InputLine {
     // We could have used a more clever data structure, but as best I could tell from a cursory
     // attempt to look through tinyfugue's source they're not doing anything more clever than
     // shuffling memory around, either.  Maybe we'll need/want to upgrade, but we can start simple
@@ -20,7 +20,7 @@ struct InputLine {
 }
 
 impl Window for InputLine {
-    fn draw(&self) -> Vec<String> {
+    fn render(&self) -> Vec<String> {
         // Split the buffer up into chunks of size `target_width`, turn them into strings and
         // force_width() them.
         self.buffer.chunks(self.target_width).map(|chunk| {
@@ -43,9 +43,7 @@ impl Window for InputLine {
         let x: usize = self.cursor % self.buffer.len();
         let y: usize = self.cursor / self.buffer.len();
 
-        // The requirement is a (1,1)-origin value, not a (0,0) one.  But if the cursor is at 0,
-        // these will definitely return 0....
-        (x+1, y+1)
+        (x, y)
     }
 
     fn set_width(&mut self, new_w: usize) {
@@ -58,8 +56,16 @@ impl Window for InputLine {
 }
 
 impl InputLine {
+    pub fn new(width: usize, _height: usize) -> InputLine {
+        InputLine {
+            buffer: vec![],
+            cursor: 0,
+            target_width: width,
+        }
+    }
+
     /// Insert a single character at the current cursor position.
-    fn insert_char(&mut self, what: char) {
+    pub fn insert_char(&mut self, what: char) {
         // The cursor is considered to be between two characters.  So, taken as an array index, it
         // will point to the character directly after itself, unless it's at the end, in which case
         // using it like an index will probably cause a panic.
@@ -72,9 +78,14 @@ impl InputLine {
         }
     }
 
+    /// Set the contents of the input to some String.
+    pub fn set_string(&mut self, what: String) {
+        self.buffer = what.chars().collect();
+    }
+
     /// Move the cursor `offset` chars to the left or right in the buffer, not allowing it to go
     /// out-of-bounds.
-    fn move_cursor(&mut self, offset: isize) {
+    pub fn move_cursor(&mut self, offset: isize) {
         if offset.is_negative() {
             let backwards = offset.abs() as usize;
             self.cursor = if backwards > self.cursor {

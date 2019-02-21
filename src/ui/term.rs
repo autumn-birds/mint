@@ -23,14 +23,13 @@ use crate::meta::{Event, EventSource, UserInterface, Command, ReadinessPager, Li
 /// Trait for objects that can be conceptualized as a rectangle on a grid of characters and drawn
 /// on screen.
 pub trait Window {
-    fn draw(&self) -> Vec<String>;
+    fn render(&self) -> Vec<String>;
     
     /// Return (width, height).
     fn get_size(&self) -> (usize, usize);
 
-    /// Return (x, y), 1-indexed to harmonise with termion's expectations.  Unless the user will be
-    /// interacting with this in a way that requires cursor positioning/movement, it's safe to just
-    /// return (1,1) here.
+    /// Return (x, y), 0-indexed.  Unless the user will be interacting with this in a way that
+    /// requires cursor positioning/movement, it's safe to just return (0,0) here.
     fn get_cursor_pos(&self) -> (usize, usize);
 
     // These are implemented as two functions because some objects (e.g. the input line) will want
@@ -47,6 +46,9 @@ pub struct TermUiManager {
     tx_template: Sender<TermEvent>,
     rx: Receiver<TermEvent>,
 
+    // TODO: Make an actual Size type, since we use this type of value in multiple places and named
+    // fields would make it a lot less potentially confusing.
+    /// Stored as (width, height).
     term_size: (usize, usize),
     stdout: AlternateScreen<termion::raw::RawTerminal<io::Stdout>>,
 
@@ -58,6 +60,8 @@ pub struct TermUiManager {
     // Eventually, we're going to want multiple views, an input line and something like window
     // management. Placeholder:
     view: screen::WrappedView,
+
+    input: input::InputLine,
 }
 
 impl TermUiManager {
@@ -73,6 +77,10 @@ impl TermUiManager {
         write!(stdout, "{}{}", termion::clear::All, termion::cursor::Hide).unwrap();
         stdout.flush().unwrap();
 
+        // Just for testing purposes:
+        let mut i = input::InputLine::new(term_w as usize, term_h as usize);
+        i.set_string("Hello, world!".to_string());
+
         TermUiManager {
             stdout,
             rx,
@@ -80,6 +88,7 @@ impl TermUiManager {
             term_size: (term_w as usize, term_h as usize),
             db: screen::DamageBuffer::new(term_w as usize, term_h as usize),
             view: screen::WrappedView::new(term_w as usize, term_h as usize),
+            input: i,
         }
     }
 }
@@ -120,17 +129,8 @@ impl EventSource for TermUiManager {
                     let (term_w, term_h) = (term_w as usize, term_h as usize);
 
                     self.db.resize(term_w, term_h);
-                    self.view.resize(term_w, term_h);
 
-                    // Render the whole view and just write it wholesale to the damage buffer.
-                    // Underlying assumption: CPU is much cheaper than I/O to the terminal for the
-                    // costs we care about.
-                    for (y, line) in self.view.render().into_iter().enumerate() {
-                        self.db.write_string(0, y, line);
-                    }
-
-                    // Tell the damage buffer to terminal-update.
-                    self.db.redraw(&mut self.stdout).unwrap();
+                    self.redraw();
                 },
                 Ok(TermEvent::Input { key: k }) => {
                     match k {
@@ -155,18 +155,56 @@ impl UserInterface for TermUiManager {
         // like.
         self.view.push(line);
 
-        // We could potentially refactor this into a self.redraw()? (repeated from
-        // above)
-        for (y, line) in self.view.render().into_iter().enumerate() {
-            self.db.write_string(0, y, line);
-        }
-
-        self.db.redraw(&mut self.stdout).unwrap();
+        self.redraw();
         Ok(())
     }
 
     fn register_command(&mut self, _c: Command) {
         // TODO
+    }
+}
+
+impl TermUiManager {
+    fn redraw(&mut self) {
+        // Render everything and just write it wholesale to the damage buffer.
+        // Underlying assumption: CPU is much cheaper than I/O to the terminal for the
+        // costs we care about.
+
+        write!(self.stdout, "{}", termion::cursor::Hide).unwrap();
+
+        let h = self.term_size.1;
+        let edit_h = self.input.get_size().1;
+        let view_h: usize = if edit_h < h {
+            h - edit_h
+        } else {
+            0
+        };
+
+        if view_h > 0 {
+            // TODO: This should also take a Size type.
+            self.view.resize(self.term_size.0, view_h);
+
+            for (y, line) in self.view.render().into_iter().enumerate() {
+                self.db.write_string(0, y, line);
+            }
+        }
+
+        let input_y = h - edit_h;
+        for (y, line) in self.input.render().into_iter().enumerate() {
+            self.db.write_string(0, input_y + y, line);
+        }
+
+        // Tell the damage buffer to terminal-update.
+        self.db.redraw(&mut self.stdout).unwrap();
+
+        // Restore the cursor to a correct position...
+        let (cursor_x, cursor_y) = self.input.get_cursor_pos();
+        let cursor_x = cursor_x as u16;
+        let cursor_y = cursor_y as u16;
+        write!(self.stdout, "{}{}", termion::cursor::Show,
+                                    termion::cursor::Goto(cursor_x + 1, cursor_y + 1 + input_y as u16)).unwrap();
+
+        self.stdout.flush().unwrap();
     }
 }
 
