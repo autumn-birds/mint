@@ -77,10 +77,6 @@ impl TermUiManager {
         write!(stdout, "{}{}", termion::clear::All, termion::cursor::Hide).unwrap();
         stdout.flush().unwrap();
 
-        // Just for testing purposes:
-        let mut i = input::InputLine::new(term_w as usize, term_h as usize);
-        i.set_string("Hello, world!".to_string());
-
         TermUiManager {
             stdout,
             rx,
@@ -88,7 +84,7 @@ impl TermUiManager {
             term_size: (term_w as usize, term_h as usize),
             db: screen::DamageBuffer::new(term_w as usize, term_h as usize),
             view: screen::WrappedView::new(term_w as usize, term_h as usize),
-            input: i,
+            input: input::InputLine::new(term_w as usize, term_h as usize),
         }
     }
 }
@@ -135,10 +131,12 @@ impl EventSource for TermUiManager {
                 Ok(TermEvent::Input { key: k }) => {
                     match k {
                         Key::Ctrl('c') => { out.push(Event::QuitRequest) },
+
                         Key::Ctrl('b') => { self.input.move_cursor(-1) },
                         Key::Left      => { self.input.move_cursor(-1) },
                         Key::Ctrl('f') => { self.input.move_cursor(1) },
-                        Key::Right     => { self.input.move_cursor(-1) },
+                        Key::Right     => { self.input.move_cursor(1) },
+
                         Key::Char(chr) => { self.input.insert_char(chr) },
                         // Obviously, huge TODO here.
                         _ => { },
