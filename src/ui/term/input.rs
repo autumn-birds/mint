@@ -78,6 +78,63 @@ impl InputLine {
         }
     }
 
+    /// Delete n chars ahead of the cursor (positive input) or behind it (negative input), moving
+    /// it backward if appropriate.
+    pub fn delete_chars(&mut self, n: isize) {
+        if n.is_negative() {
+            // What we do is split the Vec in half, truncate the first half (e.g. what's before the
+            // cursor) by however much we need to, and then glue the two halves back together.  The
+            // cursor has to be moved back in this situation, as well.
+
+            let to_del = n.abs() as usize;
+
+            let mut remainder = if self.cursor < self.buffer.len() {
+                // Note that split_off returns the 'rest of' the array, e.g., everything from its
+                // argument's index to array end inclusive.
+                self.buffer.split_off(self.cursor)
+            } else {
+                // The cursor is at (or after) the end of the text, so there isn't anything to glue
+                // on again afterwards...but we'll save ourselves some special casing.
+                vec![]
+            };
+
+            if n.abs() as usize >= self.buffer.len() {
+                // Kill everything
+                self.buffer = vec![];
+            } else {
+                // Kill n characters
+                self.buffer.truncate(self.buffer.len() - to_del);
+            }
+
+            self.buffer.append(&mut remainder);
+            self.cursor = if to_del < self.cursor {
+                self.cursor - to_del
+            } else {
+                0
+            };
+        } else {
+            // What we'll do here is split the vector in half again, but we're going to split it at
+            // (cursor + n chars) -- after that we basically do the same thing and truncate those n
+            // chars.  We don't have to move the cursor since we're only deleteing things to the
+            // right.
+
+            let splitpoint = self.cursor + n as usize;
+            let mut remainder = if splitpoint < self.buffer.len() {
+                self.buffer.split_off(splitpoint)
+            } else {
+                vec![]
+            };
+
+            if n as usize >= self.buffer.len() {
+                self.buffer = vec![];
+            } else {
+                self.buffer.truncate(self.buffer.len() - n as usize);
+            }
+
+            self.buffer.append(&mut remainder);
+        }
+    }
+
     /// Set the contents of the input to some String.
     pub fn set_string(&mut self, what: String) {
         self.buffer = what.chars().collect();
@@ -101,7 +158,7 @@ impl InputLine {
         }
     }
 
-    fn as_text(&self) -> String {
+    pub fn as_text(&self) -> String {
         let result: String = self.buffer.iter().collect();
         result
     }

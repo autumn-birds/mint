@@ -137,7 +137,18 @@ impl EventSource for TermUiManager {
                         Key::Ctrl('f') => { self.input.move_cursor(1) },
                         Key::Right     => { self.input.move_cursor(1) },
 
+                        Key::Char('\n') => {
+                            out.push(Event::UserInput {
+                                line: self.input.as_text(),
+                                which: 0,
+                            });
+                            self.input.set_string("".to_string())
+                        },
                         Key::Char(chr) => { self.input.insert_char(chr) },
+
+                        Key::Ctrl('h') => { self.input.delete_chars(-1) },
+                        Key::Ctrl('d') => { self.input.delete_chars(1) },
+
                         // Obviously, huge TODO here.
                         _ => { },
                     };
