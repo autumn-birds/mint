@@ -40,8 +40,8 @@ impl Window for InputLine {
     }
 
     fn get_cursor_pos(&self) -> (usize, usize) {
-        let x: usize = self.cursor % self.buffer.len();
-        let y: usize = self.cursor / self.buffer.len();
+        let x: usize = self.cursor % self.target_width;
+        let y: usize = self.cursor / self.target_width;
 
         (x, y)
     }
