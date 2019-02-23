@@ -139,6 +139,20 @@ fn format(text: String, opts: FmtOpts) -> Vec<ScreenLine> {
         });
     }
 
+    // There's one more degenerate case left here: If the line only contains spaces, none of the
+    // code above will execute.  But a line that only contains spaces (or a line that is the empty
+    // string) should still be formatted because, ultimately, we want to be able to have blank
+    // lines in the history as well as lines with some non-blank content...
+    //
+    // Anyway, it's possible to get here and still only have vec![] for the result.  If that
+    // happens we're going to return a blank line instead of nothing.
+    if result.len() == 0 {
+        result.push(ScreenLine {
+            text: "".to_string(),
+            for_opts: opts,
+        });
+    }
+
     result
 }
 

@@ -138,6 +138,8 @@ impl InputLine {
     /// Set the contents of the input to some String.
     pub fn set_string(&mut self, what: String) {
         self.buffer = what.chars().collect();
+        // We have to reset the cursor to somewhere anyway.
+        self.cursor = 0;
     }
 
     /// Move the cursor `offset` chars to the left or right in the buffer, not allowing it to go

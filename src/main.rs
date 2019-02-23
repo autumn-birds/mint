@@ -25,7 +25,7 @@ fn main() {
 
     let tcp = wrap(TcpConnectionManager::new());
     manager.start_source(tcp.clone());
-    tcp.borrow_mut().start_connection(address.to_string())
+    let cid = tcp.borrow_mut().start_connection(address.to_string())
          .unwrap();
 
     let tui = wrap(TermUiManager::new());
@@ -33,21 +33,32 @@ fn main() {
 
     let mut event = manager.next_event();
     loop {
-        match event.expect("Error in next_event()") {
+        match event.unwrap() {
             Event::ServerText { line: l, which: _c } => {
                 tui.borrow_mut().push_to_window("default".to_string(), l);
             },
             Event::QuitRequest => {
                 break;
             },
-            ref event => { println!("Unhandled event: {:?}", event); break; },
+            Event::UserInput { mut line, which: _ } => {
+                // Since we don't have real window management or multiple connections yet, we do
+                // ...this
+                // Obviously needs more error handling too, like everything else in this program.
+                line.push_str("\n");
+                match tcp.borrow_mut().write_to_connection(cid, line) {
+                    Ok(_) => { },
+                    Err(_) => { tui.borrow_mut().push_to_window("default".to_string(),
+                            format!("Couldn't write to connection")); }
+                }
+            }
+            ref event => {
+                tui.borrow_mut().push_to_window("default".to_string(),
+                        format!("Unhandled event: {:?}", event));
+            },
         }
         event = manager.next_event();
     }
 
-    // TODO: We need to partially re-work the Manager things so that there's a way to tell all the
-    // threads to wind down, release their resources, finish up etc. once the program needs to
-    // close...
     println!("At end of main() due to QuitRequest (probably.)");
 }
 

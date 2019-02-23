@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::sync::mpsc;
 
-use std::io::Read;
+use std::io::{Read, Write};
 
 const BUFFER_SIZE: usize = 4096;
 // 10 is ASCII newline
@@ -122,9 +122,18 @@ impl ConnectionInterface for TcpConnectionManager {
         Ok(())
     }
 
-    fn write_to_connection(&mut self, _which: ConnectionID, _what: String) -> Result<(), ()> {
-        // TODO: Implement this
-        Ok(())
+    fn write_to_connection(&mut self, which: ConnectionID, what: String) -> Result<(), ()> {
+        // TODO: Error handling here should probably be better; it ought to return a type that
+        // allows using the ? operator on I/O most likely
+        match self.links.get_mut(&which) {
+            Some(link) => {
+                match link.write(what.as_bytes()) {
+                    Err(_) => Err(()),
+                    Ok(_) => Ok(()),
+                }
+            },
+            None => Err(()),
+        }
     }
 
 }

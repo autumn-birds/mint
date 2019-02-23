@@ -125,6 +125,7 @@ impl EventSource for TermUiManager {
                     let (term_w, term_h) = (term_w as usize, term_h as usize);
 
                     self.db.resize(term_w, term_h);
+                    self.term_size = (term_w, term_h);
 
                     self.redraw();
                 },
@@ -142,7 +143,8 @@ impl EventSource for TermUiManager {
                                 line: self.input.as_text(),
                                 which: 0,
                             });
-                            self.input.set_string("".to_string())
+                            self.input.set_string("".to_string());
+                            self.redraw();
                         },
                         Key::Char(chr) => { self.input.insert_char(chr) },
 
@@ -187,7 +189,11 @@ impl TermUiManager {
 
         write!(self.stdout, "{}", termion::cursor::Hide).unwrap();
 
+        let w = self.term_size.0;
         let h = self.term_size.1;
+
+        self.input.set_width(w);
+
         let edit_h = self.input.get_size().1;
         let view_h: usize = if edit_h < h {
             h - edit_h
