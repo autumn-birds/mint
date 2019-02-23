@@ -23,10 +23,19 @@ impl Window for InputLine {
     fn render(&self) -> Vec<String> {
         // Split the buffer up into chunks of size `target_width`, turn them into strings and
         // force_width() them.
-        self.buffer.chunks(self.target_width).map(|chunk| {
+        let chunks: Vec<String> = self.buffer.chunks(self.target_width).map(|chunk| {
             let mut chunk: String = chunk.iter().collect();
             force_width(chunk, self.target_width)
-        }).collect()
+        }).collect();
+
+        // It's possible for there to be no results if the buffer is completely empty, which
+        // happens when someone erases everything in the line or it's been cleared.  In that case,
+        // we want to still return a single line of spaces so the screen clears.
+        if chunks.len() > 0 {
+            chunks
+        } else {
+            vec![" ".repeat(self.target_width)]
+        }
     }
 
     fn get_size(&self) -> (usize, usize) {
