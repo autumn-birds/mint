@@ -69,7 +69,7 @@ def main():
                 link = s
                 (eof, data) = read(s)
                 if not eof:
-                    s.write(data)
+                    s.send(data)
                     print("Got", repr(data))
                 if eof:
                     sel.unregister(s)
