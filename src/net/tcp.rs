@@ -14,11 +14,13 @@ const BUFFER_SIZE: usize = 4096;
 // 10 is ASCII newline
 const LINE_SEPARATOR: u8 = 10;
 
-/// Internal event type for TCP connection data and/or errors.
+/// Internal event type for events sent back from the listening thread.
 enum LinkEvt {
-    Data(usize, Vec<u8>),
-    Error(usize, String),
-    Eof(usize),
+    Established(ConnectionID, TcpStream),
+    CouldntEstablish(ConnectionID),
+    Data(ConnectionID, Vec<u8>),
+    Error(ConnectionID, String),
+    Eof(ConnectionID),
 }
 
 /// EventSource for TCP connections.
@@ -32,11 +34,11 @@ pub struct TcpConnectionManager {
     // want to register along a channel, and use mio's Registraton/SetReadiness mechanism to alert
     // the polling loop.
 
-    socketreg_tx: mpsc::Sender<Connection>,
+    socketreg_tx: mpsc::Sender<ConnectionRequest>,
     // This is wrapped in an Option because we want to create it when calling new(), but it does
     // need to be moved into a struct later.  (Ultimately, it is moved across thread boundaries and
     // the reader thread registers it to a Poll instance.)
-    socketreg_rx: Option<mpsc::Receiver<Connection>>,
+    socketreg_rx: Option<mpsc::Receiver<ConnectionRequest>>,
 
     socketreg_sr: mio::SetReadiness,
     // This is in an Option for the same reason.
@@ -50,23 +52,21 @@ pub struct TcpConnectionManager {
     input_buffers: HashMap<ConnectionID, Vec<u8>>
 }
 
-/// Listener impl for TcpConnectionManager.
-struct TcpListener {
-    socketreg_rx: mpsc::Receiver<Connection>,
-    socketreg_alert: mio::Registration,
-    data_tx: mpsc::Sender<LinkEvt>,
-}
-
-/// This struct represents a socket along with its ConnectionID.
-struct Connection {
-    socket: TcpStream,
+/// This struct represents a request to the listening thread that a new connection be started.
+/// It's done in a thread because, despite the ADDITIONAL back and forth complexity, we get
+/// multiple results from parsing any given address and we need to try all of them in case the
+/// first one doesn't work.  (`localhost` did not work in my initial "just use the first one and
+/// hope" test, I suspect because my dummy server was probably only listening on IPv4 or
+/// something...?)
+struct ConnectionRequest {
+    addrs: Vec<SocketAddr>,
     cid: ConnectionID,
 }
 
 impl TcpConnectionManager {
     pub fn new() -> TcpConnectionManager {
         let (registration, set_readiness) = mio::Registration::new2();
-        let (tx, rx) = mpsc::channel::<Connection>();
+        let (tx, rx) = mpsc::channel::<ConnectionRequest>();
         let (tx2, rx2) = mpsc::channel::<LinkEvt>();
 
         return TcpConnectionManager {
@@ -92,35 +92,23 @@ impl ConnectionInterface for TcpConnectionManager {
     fn start_connection(&mut self, address: String) -> Result<ConnectionID, String> {
         let cid = self.last_connection_id;
 
-        let address = match address.as_str().to_socket_addrs() {
-            // I'm guessing the reason there can be multiple items here is that, e.g.,
-            // if you put 'localhost' it can resolve either the IPv4 localhost or the
-            // IPv6 localhost. TODO: Keep all of the results and only fail the connection
-            // attempt when we've tried all of them.
-            Ok(mut results) => match results.next() {
-                Some(addr) => addr,
-                None => return Err(format!("No results getting address for {}", address)),
-            },
+        let addrs: Vec<SocketAddr> = match address.as_str().to_socket_addrs() {
+            Ok(mut results) => results.collect(),
             Err(_) => { return Err(format!("Couldn't get address for {}", address)) },
         };
 
-        let stream = match TcpStream::connect(&address) {
-            Ok(stream) => stream,
-            Err(_) => { return Err("Couldn't connect".to_string()) },
-        };
-
-        // I consider it OKAY-ISH to panic here? because if the threads are unwinding in that
-        // way it means something is pretty seriously wrong with the entire program. IT MIGHT
-        // BE A TERRIBLE IDEA. XXX
-        self.socketreg_tx.send(Connection {
-            socket: stream.try_clone().unwrap(),
-            cid: cid
+        // I consider it OKAY-ISH to panic here? and in similar cases? because if the threads are
+        // unwinding in that way it means something is pretty seriously wrong with the entire
+        // program. IT MIGHT BE A TERRIBLE IDEA.  This might be able to be turned into a ? some
+        // day, when we get to issue 9.
+        self.socketreg_tx.send(ConnectionRequest {
+            addrs,
+            cid: self.last_connection_id,
         }).expect("TcpConnectionManager internal error: Couldn't send() fd to reader for registration");
 
         self.socketreg_sr.set_readiness(Ready::readable())
               .expect("TcpConnectionManager internal error: Couldn't set_readiness() for socket registration");
 
-        self.links.insert(cid, stream);
         self.last_connection_id += 1;
         Ok(cid)
     }
@@ -155,6 +143,7 @@ impl EventSource for TcpConnectionManager {
                 socketreg_rx: rx,
                 socketreg_alert: alert,
                 data_tx: self.listener_tx.clone(),
+                pending_requests: HashMap::new(),
             })],
             _ => { panic!("Cannot call listener() on ConnectionInterface more than once.") }
         }
@@ -188,18 +177,95 @@ impl EventSource for TcpConnectionManager {
                         which: cid,
                         reason: format!("Link error: {}", msg),
                     });
+                    self.links.remove(&cid); // We...probably don't care if this fails? XXX
+                },
+                Ok(LinkEvt::Established(cid, stream)) => {
+                    queue.push(Event::ConnectionStart {
+                        which: cid,
+                    });
+                    self.links.insert(cid, stream);
+                },
+                Ok(LinkEvt::CouldntEstablish(cid)) => {
+                    // TODO: Should this have its own event?
+                    queue.push(Event::ConnectionEnd {
+                        which: cid,
+                        reason: "Could not establish connection".to_string(),
+                    });
                 },
                 Ok(LinkEvt::Eof(cid)) => {
                     queue.push(Event::ConnectionEnd {
                         which: cid,
                         reason: format!("End of connection"),
                     });
+                    self.links.remove(&cid);
                 },
                 Err(_) => break,
             }
         }
 
         queue
+    }
+}
+
+
+
+/// Listener impl for TcpConnectionManager; data/object for the listener thread for TCP
+/// connections.
+struct TcpListener {
+    socketreg_rx: mpsc::Receiver<ConnectionRequest>,
+    socketreg_alert: mio::Registration,
+    data_tx: mpsc::Sender<LinkEvt>,
+
+    // This is a list of pending connection requests.  We need it because any given address string,
+    // when parsed/resolved, can yield a number of different possible SocketAddr's that might not
+    // all be the correct one (e.g., when something is listening on IPv4 but not IPv6.)  The
+    // HashMap lets us check if the connection is part of a pending request when something fails;
+    // when a read or write on a connection succeeds, we remove it from pending_requests if it's
+    // there.
+    pending_requests: HashMap<ConnectionID, Vec<SocketAddr>>,
+}
+
+
+impl TcpListener {
+    /// Try to connect to the next option available 
+    fn try_request(&mut self, req: ConnectionID) -> Option<TcpStream> {
+        if let Some(mut opts_left) = self.pending_requests.get_mut(&req) {
+            while opts_left.len() > 0 {
+                // Can unwrap() here because we know len > 0.
+                let address_to_try = opts_left.pop().unwrap();
+
+                let stream = match TcpStream::connect(&address_to_try) {
+                    Ok(stream) => return Some(stream),
+                    Err(_) => { },
+                };
+            }
+        }
+
+        // At this point, we know that either opts_left.len() == 0 (no more addresses to try, if
+        // there ever were) or the request no longer exists at all.  (The loop above should always
+        // have drained everything before the code gets to this point.)  We can safely try to
+        // remove it from pending_requests.
+        self.pending_requests.remove(&req);
+
+        None
+    }
+
+    /// Deal with trying a connection request and taking the appropriate actions.  Called
+    /// internally.
+    fn handle_request(&mut self, poll: &mio::Poll, links: &mut HashMap<ConnectionID, TcpStream>, flag: &mut Box<ReadinessPager>, cid: ConnectionID) {
+        match self.try_request(cid) {
+            Some(stream) => {
+                // We don't send Established here; it would be premature.  It can fail
+                // on a read() still.
+                poll.register(&stream, Token(cid), Ready::readable(), PollOpt::level()).unwrap();
+                links.insert(cid, stream);
+            },
+            None => {
+                self.data_tx.send(LinkEvt::CouldntEstablish(cid))
+                    .expect("Couldn't send() LinkEvt");
+                flag.ok();
+            }
+        }
     }
 }
 
@@ -220,20 +286,18 @@ impl Listener for TcpListener {
             poll.poll(&mut events, None).unwrap();
             for event in &events {
                 if event.token() == Token(0) {
-                    // We're being told we have a new socket to register.
-                    // TODO: We may want to make sure we don't block forever if this is fired
-                    // erroneously, but for now we can hope it's never fired erroneously.
-                    let new_link: Connection = self.socketreg_rx.recv().unwrap();
-                    let stream = new_link.socket;
-                    poll.register(&stream, Token(new_link.cid), Ready::readable(), PollOpt::level()).unwrap();
-                    links.insert(new_link.cid, stream);
+                    // A ConnectionRequest has arrived.  Deal with it.
+                    let request: ConnectionRequest = self.socketreg_rx.recv().unwrap();
+                    let cid = request.cid;
+                    self.pending_requests.insert(cid, request.addrs);
+                    self.handle_request(&poll, &mut links, &mut flag, cid);
                 } else {
                     // Read from a socket.  Full disclosure: This code is heavily based on an
                     // example I found randomly in mio's Token documentation.
+                    //
+                    // TODO: These indents are excessive, figure out how to factor out some of
+                    // this.
                     let cid: usize = event.token().0;
-                    // TODO: We should probably be maintaining actual buffers for this, between
-                    // calls.  Or some sort of pending-message storage, in case one call doesn't
-                    // produce a complete line.  For now (for testing) this will do.
                     let mut buffer = [0u8; BUFFER_SIZE];
                     loop {
                         // TODO: IMPORTANT -- Don't panic if it doesn't exist in the links.  Do
@@ -241,14 +305,19 @@ impl Listener for TcpListener {
                         // or whatever seems most appropriate.
                         match links.get_mut(&cid).expect("links.get_mut").read(&mut buffer) {
                             Ok(0) => {
-                                // End of the link.  Drop it on this end.  TODO: The
-                                // TcpConnectionManager instance in the main thread will probably
-                                // still retain its link, and that's not the best thing.  (We could
-                                // require that stop_connection() be called, but that's less than
-                                // ideal, because it means we have a non-obvious API that the
-                                // outside world needs to honor.  Ideally we'd be able to tend all
-                                // of our own internal state here.)
-                                poll.deregister(links.get(&cid).expect("links.get")).expect("deregister");
+                                // End of the link.  Drop it on this end.  When we send the Error
+                                // event, the code that owns the other copy of the connection
+                                // should also drop it.
+                                poll.deregister(links.get(&cid).expect("links.get"))
+                                    .expect("deregister");
+
+                                // We PROBABLY don't want to try the next address in a pending
+                                // request here ... if it immediately closed the connection, it's
+                                // likely whoever set up the server doesn't want us there?  In that
+                                // case, it's rude to instantly poke them on another IP.  If
+                                // there's a real error case where this is the very first result,
+                                // that would change.
+
                                 links.remove(&cid);
                                 self.data_tx.send(LinkEvt::Eof(cid))
                                     .expect("Couldn't send Eof back to main thread");
@@ -256,11 +325,29 @@ impl Listener for TcpListener {
                                 break;
                             },
                             Ok(num_bytes) => {
-                                // TODO: Actual handling of, like, lines (e.g. buffer until \n)
+                                // The buffering is done after it's sent across the thread (see
+                                // above code.) XXX Maybe we should have the buffering-for-lines
+                                // here anyway; think about it. (For example, a misbehaving server
+                                // could send us a tremendous amount of data and clog up the main
+                                // thread with buffering, whereas if it clogged up the TCP I/O
+                                // thread, the user might be able to notice in some cases and close
+                                // the link, which would call close() on the main-thread side and
+                                // put a stop to it.)
                                 let mut vec = Vec::new();
                                 vec.extend_from_slice(&buffer[..num_bytes]);
+
+                                // See the comment on pending_requests for explanation.
+                                if let Some(_) = self.pending_requests.get(&cid) {
+                                    let new_link = links.get_mut(&cid).expect("links.get_mut")
+                                        .try_clone().expect("clone link");
+                                    self.data_tx.send(LinkEvt::Established(cid, new_link))
+                                        .expect("Couldn't send LinkEvt::Established");
+                                    self.pending_requests.remove(&cid);
+                                }
+
                                 self.data_tx.send(LinkEvt::Data(cid, vec))
-                                    .expect("Couldn't send Data back to main thread");
+                                    .expect("Couldn't send LinkEvt::Data");
+
                                 flag.ok();
                             },
                             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -277,6 +364,11 @@ impl Listener for TcpListener {
                                 // Let the main thread know things went sideways.
                                 self.data_tx.send(LinkEvt::Error(cid, format!("Problem calling read(): {}", e)))
                                     .expect("Couldn't send Error back to main thread");
+
+                                // If there are more addresses in a pending_request, we'll try the
+                                // next one of those.
+                                self.handle_request(&poll, &mut links, &mut flag, cid);
+
                                 flag.ok();
 
                                 break;
