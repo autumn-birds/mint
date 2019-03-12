@@ -3,12 +3,12 @@ use crate::meta::{Event, ConnectionInterface, EventSource, ConnectionID, Readine
 
 use mio::{Events, Poll, Ready, PollOpt, Token};
 use mio::net::TcpStream;
-
-use std::net::SocketAddr;
-use std::collections::HashMap;
-use std::sync::mpsc;
-
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::io::{Read, Write};
+
+use std::collections::HashMap;
+
+use std::sync::mpsc;
 
 const BUFFER_SIZE: usize = 4096;
 // 10 is ASCII newline
@@ -17,7 +17,7 @@ const LINE_SEPARATOR: u8 = 10;
 /// Internal event type for TCP connection data and/or errors.
 enum LinkEvt {
     Data(usize, Vec<u8>),
-    Error(usize),
+    Error(usize, String),
     Eof(usize),
 }
 
@@ -92,18 +92,26 @@ impl ConnectionInterface for TcpConnectionManager {
     fn start_connection(&mut self, address: String) -> Result<ConnectionID, String> {
         let cid = self.last_connection_id;
 
-        // TODO: Support something fancier, e.g., that looks up DNS.
-        let addr: SocketAddr = match address.as_str().parse() {
-            Ok(addr) => addr,
-            Err(_) => { return Err(format!("Couldn't parse {} as an address", address)) },
+        let address = match address.as_str().to_socket_addrs() {
+            // I'm guessing the reason there can be multiple items here is that, e.g.,
+            // if you put 'localhost' it can resolve either the IPv4 localhost or the
+            // IPv6 localhost. TODO: Keep all of the results and only fail the connection
+            // attempt when we've tried all of them.
+            Ok(mut results) => match results.next() {
+                Some(addr) => addr,
+                None => return Err(format!("No results getting address for {}", address)),
+            },
+            Err(_) => { return Err(format!("Couldn't get address for {}", address)) },
         };
 
-        let stream = match TcpStream::connect(&addr) {
+        let stream = match TcpStream::connect(&address) {
             Ok(stream) => stream,
             Err(_) => { return Err("Couldn't connect".to_string()) },
         };
 
-        // TODO: Revisit this and consider more verbose, "softer" error handling here.
+        // I consider it OKAY-ISH to panic here? because if the threads are unwinding in that
+        // way it means something is pretty seriously wrong with the entire program. IT MIGHT
+        // BE A TERRIBLE IDEA. XXX
         self.socketreg_tx.send(Connection {
             socket: stream.try_clone().unwrap(),
             cid: cid
@@ -135,7 +143,6 @@ impl ConnectionInterface for TcpConnectionManager {
             None => Err(()),
         }
     }
-
 }
 
 impl EventSource for TcpConnectionManager {
@@ -176,10 +183,10 @@ impl EventSource for TcpConnectionManager {
                         buffer.drain(0..line.len() + 1);
                     }
                 },
-                Ok(LinkEvt::Error(cid)) => {
+                Ok(LinkEvt::Error(cid, msg)) => {
                     queue.push(Event::ConnectionEnd {
                         which: cid,
-                        reason: format!("Error trying to read from the TcpStream"),
+                        reason: format!("Link error: {}", msg),
                     });
                 },
                 Ok(LinkEvt::Eof(cid)) => {
@@ -260,15 +267,18 @@ impl Listener for TcpListener {
                                 // The socket is not ready anymore, stop reading
                                 break;
                             },
-                            Err(_e) => {
+                            Err(ref e) => {
                                 // We assume the link wrapped up here--that an error means we
                                 // probably can't keep using it.  TODO: Do we need to (or should
                                 // we) do anything to make sure e.g. close()ing?
                                 poll.deregister(links.get(&cid).expect("links.get")).expect("deregister");
                                 links.remove(&cid);
-                                self.data_tx.send(LinkEvt::Error(cid))
+
+                                // Let the main thread know things went sideways.
+                                self.data_tx.send(LinkEvt::Error(cid, format!("Problem calling read(): {}", e)))
                                     .expect("Couldn't send Error back to main thread");
                                 flag.ok();
+
                                 break;
                             },
                         }
