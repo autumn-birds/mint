@@ -1,7 +1,5 @@
 
-// TODO: Shouldn't there be a prettier way to import this?
-use crate::ui::term::Window;
-use crate::utils::force_width;
+use crate::ui::term::{Window, text::force_width};
 
 /// UI for input/editing of a single line of text on the terminal.
 pub struct InputLine {
@@ -102,8 +100,6 @@ impl InputLine {
                 // argument's index to array end inclusive.
                 self.buffer.split_off(self.cursor)
             } else {
-                // The cursor is at (or after) the end of the text, so there isn't anything to glue
-                // on again afterwards...but we'll save ourselves some special casing.
                 vec![]
             };
 

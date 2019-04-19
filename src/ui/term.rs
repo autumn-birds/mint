@@ -14,6 +14,9 @@ use signal_hook::iterator::Signals;
 
 mod input;
 mod screen;
+mod text;
+
+
 // TODO: We should just scrape the `Command' type out. It's pointless indirection and introduces
 // confusion as to what Commands even are, plus the possibility to break stuff less-obviously by
 // changing it.
@@ -59,7 +62,7 @@ pub struct TermUiManager {
 
     // Eventually, we're going to want multiple views, an input line and something like window
     // management. Placeholder:
-    view: screen::WrappedView,
+    view: text::WrappedView,
 
     input: input::InputLine,
 }
@@ -83,7 +86,7 @@ impl TermUiManager {
             tx_template: tx,
             term_size: (term_w as usize, term_h as usize),
             db: screen::DamageBuffer::new(term_w as usize, term_h as usize),
-            view: screen::WrappedView::new(term_w as usize, term_h as usize),
+            view: text::WrappedView::new(term_w as usize, term_h as usize),
             input: input::InputLine::new(term_w as usize, term_h as usize),
         }
     }
