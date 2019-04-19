@@ -124,7 +124,7 @@ impl InputLine {
         } else {
             // What we'll do here is split the vector in half again, but we're going to split it at
             // (cursor + n chars) -- after that we basically do the same thing and truncate those n
-            // chars.  We don't have to move the cursor since we're only deleteing things to the
+            // chars.  We don't have to move the cursor since we're only deleting things to the
             // right.
 
             let splitpoint = self.cursor + n as usize;
