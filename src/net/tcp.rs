@@ -93,7 +93,7 @@ impl ConnectionInterface for TcpConnectionManager {
         let cid = self.last_connection_id;
 
         let addrs: Vec<SocketAddr> = match address.as_str().to_socket_addrs() {
-            Ok(mut results) => results.collect(),
+            Ok(results) => results.collect(),
             Err(_) => { return Err(format!("Couldn't get address for {}", address)) },
         };
 
@@ -158,7 +158,7 @@ impl EventSource for TcpConnectionManager {
         loop {
             match self.listener_rx.try_recv() {
                 Ok(LinkEvt::Data(cid, mut what)) => {
-                    let mut buffer = self.input_buffers.entry(cid).or_insert(Vec::new());
+                    let buffer = self.input_buffers.entry(cid).or_insert(Vec::new());
                     buffer.append(&mut what);
 
                     // Drain all the *complete* lines out of the buffer and push them into the
@@ -229,12 +229,12 @@ struct TcpListener {
 impl TcpListener {
     /// Try to connect to the next option available 
     fn try_request(&mut self, req: ConnectionID) -> Option<TcpStream> {
-        if let Some(mut opts_left) = self.pending_requests.get_mut(&req) {
+        if let Some(opts_left) = self.pending_requests.get_mut(&req) {
             while opts_left.len() > 0 {
                 // Can unwrap() here because we know len > 0.
                 let address_to_try = opts_left.pop().unwrap();
 
-                let stream = match TcpStream::connect(&address_to_try) {
+                match TcpStream::connect(&address_to_try) {
                     Ok(stream) => return Some(stream),
                     Err(_) => { },
                 };

@@ -24,7 +24,7 @@ impl Window for InputLine {
         // Split the buffer up into chunks of size `target_width`, turn them into strings and
         // force_width() them.
         let chunks: Vec<String> = self.buffer.chunks(self.target_width).map(|chunk| {
-            let mut chunk: String = chunk.iter().collect();
+            let chunk: String = chunk.iter().collect();
             force_width(chunk, self.target_width)
         }).collect();
 
