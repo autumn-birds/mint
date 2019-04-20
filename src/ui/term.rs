@@ -3,7 +3,6 @@ use std::sync::mpsc;
 use std::sync::mpsc::{Sender, Receiver};
 use std::io::{Write, stdout, stdin};
 use std::io;
-use std::thread;
 
 use termion::event::Key;
 use termion::raw::IntoRawMode;

@@ -3,7 +3,7 @@ use mint;
 use mint::meta::*;
 use mint::events::ThreadedManager;
 
-use mint::net::tcp::TcpConnectionManager;
+use mint::net::{ConnectionInterface, tcp::TcpConnectionManager};
 use mint::ui::{UserInterface, term::TermUiManager};
 
 use std::env;

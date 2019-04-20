@@ -1,5 +1,6 @@
 
-use crate::meta::{Event, ConnectionInterface, EventSource, ConnectionID, ReadinessPager, Listener};
+use crate::meta::{Event, EventSource, ReadinessPager, Listener};
+use crate::net::{ConnectionInterface, ConnectionID}; 
 
 use mio::{Events, Poll, Ready, PollOpt, Token};
 use mio::net::TcpStream;
