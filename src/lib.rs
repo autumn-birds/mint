@@ -4,7 +4,6 @@ pub mod meta;
 pub mod events;
 pub mod net;
 pub mod ui;
-pub mod utils;
 
 extern crate mio;
 extern crate termion;

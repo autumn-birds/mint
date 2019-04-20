@@ -12,15 +12,15 @@ use termion::input::TermRead;
 
 use signal_hook::iterator::Signals;
 
-mod input;
-mod screen;
-mod text;
-
-
 // TODO: We should just scrape the `Command' type out. It's pointless indirection and introduces
 // confusion as to what Commands even are, plus the possibility to break stuff less-obviously by
 // changing it.
-use crate::meta::{Event, EventSource, UserInterface, Command, ReadinessPager, Listener};
+use crate::meta::{Event, EventSource, ReadinessPager, Listener};
+use crate::ui::{UserInterface, Command};
+
+mod input;
+mod screen;
+mod text;
 
 
 /// Trait for objects that can be conceptualized as a rectangle on a grid of characters and drawn

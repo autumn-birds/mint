@@ -4,7 +4,7 @@ use mint::meta::*;
 use mint::events::ThreadedManager;
 
 use mint::net::tcp::TcpConnectionManager;
-use mint::ui::term::TermUiManager;
+use mint::ui::{UserInterface, term::TermUiManager};
 
 use std::env;
 use std::{cell::RefCell, rc::Rc};
